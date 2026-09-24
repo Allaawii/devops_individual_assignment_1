@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+data/
+raw/
+.coverage
+htmlcov/
+
+# Local-only planning/instructions files, not for the remote repo
+PROJECT_PLAN.md
+CLAUDE.md
