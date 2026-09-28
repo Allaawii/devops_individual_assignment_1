@@ -19,3 +19,11 @@ class Word:
     headword: str
     meaning: str | None
     frequency_rank: int | None
+
+
+@dataclass(frozen=True)
+class SentenceDetail:
+    """A sentence together with the words extracted from it."""
+
+    sentence: Sentence
+    words: list[Word]
