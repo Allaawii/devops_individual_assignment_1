@@ -4,7 +4,10 @@ from datetime import date, timedelta
 
 import pytest
 
-from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD, MIN_EASE, SM2Strategy
+from trainer.scheduler.algorithms import (
+    AGAIN, EASY, GOOD, HARD, MAX_BOX, MIN_EASE, STRATEGIES,
+    LeitnerStrategy, SchedulingStrategy, SM2Strategy, get_strategy,
+)
 from trainer.scheduler.models import CardState
 
 TODAY = date(2026, 9, 28)
@@ -101,3 +104,58 @@ def test_input_state_is_not_modified(sm2):
     state = CardState(ease_factor=2.5, interval_days=6, repetitions=2)
     sm2.next_state(state, GOOD, TODAY)
     assert state == CardState(ease_factor=2.5, interval_days=6, repetitions=2)
+
+
+# ----- Leitner -----
+
+@pytest.fixture
+def leitner() -> LeitnerStrategy:
+    return LeitnerStrategy()
+
+
+def test_leitner_success_moves_new_card_to_box_1(leitner):
+    state = leitner.next_state(NEW, GOOD, TODAY)
+    assert (state.repetitions, state.interval_days) == (1, 2)
+    assert state.due_date == TODAY + timedelta(days=2)
+
+
+def test_leitner_interval_doubles_with_each_box(leitner):
+    intervals = [_review_n_times(leitner, GOOD, n).interval_days for n in (1, 2, 3)]
+    assert intervals == [2, 4, 8]
+
+
+def test_leitner_box_is_capped(leitner):
+    state = _review_n_times(leitner, EASY, MAX_BOX + 3)
+    assert (state.repetitions, state.interval_days) == (MAX_BOX, 2 ** MAX_BOX)
+
+
+def test_leitner_lapse_sends_card_back_to_box_0(leitner):
+    state = leitner.next_state(_review_n_times(leitner, GOOD, 3), AGAIN, TODAY)
+    assert (state.repetitions, state.interval_days) == (0, 1)
+
+
+@pytest.mark.parametrize("quality", [AGAIN, HARD, GOOD, EASY])
+def test_leitner_never_changes_ease(leitner, quality):
+    assert leitner.next_state(NEW, quality, TODAY).ease_factor == NEW.ease_factor
+
+
+def test_leitner_rejects_invalid_quality(leitner):
+    with pytest.raises(ValueError):
+        leitner.next_state(NEW, 6, TODAY)
+
+
+# ----- registry -----
+
+@pytest.mark.parametrize("name, expected", [("sm2", SM2Strategy), ("leitner", LeitnerStrategy),
+                                            ("SM2", SM2Strategy)])
+def test_get_strategy_builds_the_registered_class(name, expected):
+    assert isinstance(get_strategy(name), expected)
+
+
+def test_unknown_strategy_fails_with_the_valid_names():
+    with pytest.raises(ValueError, match="sm2, leitner"):
+        get_strategy("sm3")
+
+
+def test_every_registered_class_is_a_scheduling_strategy():
+    assert all(issubclass(cls, SchedulingStrategy) for cls in STRATEGIES.values())
