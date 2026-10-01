@@ -1,0 +1,6 @@
+[run]
+source = trainer
+# Routes and seed loading are covered by smoke tests only, not counted (stated in ADR-4 and the README).
+omit =
+    trainer/*/routes.py
+    trainer/content/seed.py
