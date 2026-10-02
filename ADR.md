@@ -22,3 +22,19 @@ Context: The scheduler's cards table must point at content's words and sentences
 Decision: cards stores word_id and sentence_id as plain IDs with no foreign key. Foreign keys are used only inside each domain, and partial unique indexes allow one card per word or sentence.
 Alternatives considered: Foreign keys from cards to words and sentences (rejected: they tie both domains to one database and block a split).
 Consequences: The scheduler's tables can move independently. The cost is possible orphaned cards if content were deleted, so v1 has no "delete sentence" feature.
+
+## 4. Test pure logic and services with fakes
+Date: 2026-10-02
+Status: Decided
+Context: The core logic must be checked quickly and repeatably, and scheduling results depend on the date.
+Decision: Scheduling strategies are pure and take today as a parameter; services depend on abstract repositories, so their tests use in-memory fakes; the SQLite repositories are tested separately against a temporary database. Routes and seed loading are excluded from the coverage number (.coveragerc) and only smoke-tested.
+Alternatives considered: Mainly end-to-end tests through Flask requests (rejected: slower, and a failure is hard to trace to one piece).
+Consequences: Fast tests with about 99% coverage of the core logic. The cost is keeping the fakes in line with the real repositories, and the coverage number openly leaves out the routes.
+
+## 5. No gamification
+Date: 2026-10-02
+Status: Decided
+Context: The target learners plateaued on gamified apps; the goal is long-term retention, not daily engagement.
+Decision: No streaks, hearts, points or leaderboards. The dashboard only shows cards due, new cards left today, and reviews done today.
+Alternatives considered: Streaks and leaderboards (rejected: they reward opening the app rather than remembering, and punish missed days). Also considered and deferred: user login, multiple languages, a stats dashboard.
+Consequences: A simpler app focused on reviewing. The cost is less outside motivation for learners who enjoy game elements.
