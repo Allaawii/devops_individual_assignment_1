@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Today</h1>
+<div class="stats">
+  <div class="stat"><span class="stat-label">Due now</span><span class="stat-value">{{ stats.due_now }}</span></div>
+  <div class="stat"><span class="stat-label">New left today</span><span class="stat-value">{{ stats.new_left_today }}</span></div>
+  <div class="stat"><span class="stat-label">Reviewed today</span><span class="stat-value">{{ stats.reviewed_today }}</span></div>
+  <div class="stat"><span class="stat-label">Sentences</span><span class="stat-value">{{ sentence_count }}</span></div>
+</div>
+
+{% if stats.due_now or stats.new_left_today %}
+<p><a class="button" href="{{ url_for('review.show_card') }}">Start review</a></p>
+{% elif sentence_count == 0 %}
+<p>Start with a sentence you'd like to learn. <a href="{{ url_for('content.new_sentence') }}">Add a sentence</a></p>
+{% else %}
+<p class="muted">Nothing left for today. Come back tomorrow.</p>
+{% endif %}
+{% endblock %}

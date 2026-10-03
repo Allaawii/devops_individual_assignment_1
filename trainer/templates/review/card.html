@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Review · Spanish trainer{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted">{{ "Sentence" if sentence else "Word" }} card</p>
+  <p class="front" lang="es">{{ sentence.spanish_text if sentence else word.headword }}</p>
+
+  <details>
+    <summary>Show answer</summary>
+    <div class="back">
+      {% if sentence %}
+        <p>{{ sentence.english_text }}</p>
+        {% if sentence.grammar_note %}<p class="note">{{ sentence.grammar_note }}</p>{% endif %}
+        <p><a href="{{ url_for('content.sentence_detail', sentence_id=sentence.id) }}">See the words in this sentence</a></p>
+      {% else %}
+        {% if word.meaning %}<p class="meaning">{{ word.meaning }}</p>{% endif %}
+        <ul class="examples">
+          {% for example in examples %}
+          <li><span lang="es">{{ example.spanish_text }}</span><br><span class="muted">{{ example.english_text }}</span></li>
+          {% endfor %}
+        </ul>
+        {% if not word.meaning %}<p class="muted"><a href="{{ url_for('content.list_words') }}">Add a meaning for this word</a></p>{% endif %}
+      {% endif %}
+
+      <form method="post" action="{{ url_for('review.rate', card_id=card.id) }}" class="ratings">
+        {% for label, quality in ratings %}
+        <button type="submit" name="quality" value="{{ quality }}"{% if label != "Good" %} class="secondary"{% endif %}>{{ label }}</button>
+        {% endfor %}
+      </form>
+    </div>
+  </details>
+</div>
+<p class="muted">{{ stats.due_now }} due · {{ stats.new_left_today }} new left today</p>
+{% endblock %}
