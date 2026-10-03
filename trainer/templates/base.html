@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Spanish trainer{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Spanish trainer</a>
+    <nav>
+      <a href="/review">Review</a>
+      <a href="{{ url_for('content.list_sentences') }}">Sentences</a>
+      <a href="{{ url_for('content.list_words') }}">Words</a>
+      <a href="{{ url_for('content.new_sentence') }}">Add sentence</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Example sentences from Tatoeba (tatoeba.org), CC BY 2.0 FR.</footer>
+</body>
+</html>
