@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "macros.html" import pager %}
+{% block title %}Sentences · Spanish trainer{% endblock %}
+{% block content %}
+<h1>Sentences <span class="muted">({{ total }})</span></h1>
+{% if sentences %}
+<table>
+  <thead><tr><th>Spanish</th><th class="hide-small">English</th></tr></thead>
+  <tbody>
+    {% for sentence in sentences %}
+    <tr>
+      <td lang="es"><a href="{{ url_for('content.sentence_detail', sentence_id=sentence.id) }}">{{ sentence.spanish_text }}</a></td>
+      <td class="hide-small">{{ sentence.english_text }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{{ pager('content.list_sentences', page, has_next) }}
+{% else %}
+<p>Start your collection. <a href="{{ url_for('content.new_sentence') }}">Add a sentence</a></p>
+{% endif %}
+{% endblock %}

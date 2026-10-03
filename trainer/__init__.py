@@ -5,6 +5,7 @@ from flask import Flask, jsonify
 from trainer import db
 from trainer.config import Config
 from trainer.content.repository import SqliteSentenceRepository, SqliteWordRepository
+from trainer.content.routes import create_blueprint as create_content_blueprint
 from trainer.content.service import ContentService
 from trainer.scheduler.algorithms import get_strategy
 from trainer.scheduler.repository import SqliteCardRepository, SqliteReviewLog
@@ -25,6 +26,7 @@ def create_app(config: Config | None = None) -> Flask:
     content_service.subscribe(review_service.on_sentence_added)
     app.extensions["content_service"] = content_service
     app.extensions["review_service"] = review_service
+    app.register_blueprint(create_content_blueprint(content_service))
 
     @app.get("/health")
     def health():
