@@ -30,14 +30,23 @@
       {% endif %}
 
       <form method="post" action="{{ url_for('review.rate', card_id=card.id) }}" class="ratings">
-        {% for label, quality in ratings %}
+        {% for label, quality, meaning in ratings %}
         <button type="submit" name="quality" value="{{ quality }}" accesskey="{{ loop.index }}"
-                {%- if label != "Good" %} class="secondary"{% endif %}>
-          {{ label }} <span class="interval">{{ intervals[quality] }}d</span>
-        </button>
+                {%- if label != "Good" %} class="secondary"{% endif %}>{{ label }}</button>
         {% endfor %}
       </form>
-      <p class="hint">Each button shows when you'll see this card again.</p>
+
+      <div class="info">
+        <p class="info-title">What the buttons do</p>
+        <ul>
+          {% for label, quality, meaning in ratings %}
+          {% set days = intervals[quality] %}
+          <li><strong>{{ label }}</strong>: {{ meaning }}. You'll see this card again
+            {{ "tomorrow" if days == 1 else "in " ~ days ~ " days" }}.</li>
+          {% endfor %}
+        </ul>
+        <p class="muted">The more often you remember a card, the longer it waits before coming back.</p>
+      </div>
     </div>
   </details>
 </div>

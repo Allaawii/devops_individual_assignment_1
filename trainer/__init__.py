@@ -8,7 +8,7 @@ from trainer.content.repository import SqliteSentenceRepository, SqliteWordRepos
 from trainer.content.routes import create_blueprint as create_content_blueprint
 from trainer.content.service import ContentService
 from trainer.scheduler.algorithms import get_strategy
-from trainer.scheduler.repository import SqliteCardRepository, SqliteReviewLog
+from trainer.scheduler.repository import SqliteCardRepository, SqliteReviewLog, SqliteSettingsStore
 from trainer.scheduler.routes import create_blueprint as create_review_blueprint
 from trainer.scheduler.service import ReviewService
 
@@ -23,7 +23,7 @@ def create_app(config: Config | None = None) -> Flask:
 
     content_service = ContentService(SqliteSentenceRepository(db.get_db), SqliteWordRepository(db.get_db))
     review_service = ReviewService(SqliteCardRepository(db.get_db), SqliteReviewLog(db.get_db),
-                                   strategy, config.new_cards_per_day)
+                                   SqliteSettingsStore(db.get_db), strategy, config.new_cards_per_day)
     content_service.subscribe(review_service.on_sentence_added)
     app.extensions["content_service"] = content_service
     app.extensions["review_service"] = review_service

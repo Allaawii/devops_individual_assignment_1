@@ -9,7 +9,7 @@ from trainer.content.models import Sentence
 from trainer.content.repository import SqliteSentenceRepository, SqliteWordRepository
 from trainer.db import connect
 from trainer.scheduler.models import SENTENCE_CARD, WORD_CARD, CardState, Review
-from trainer.scheduler.repository import SqliteCardRepository, SqliteReviewLog
+from trainer.scheduler.repository import SqliteCardRepository, SqliteReviewLog, SqliteSettingsStore
 
 CREATED_AT = "2026-09-27T10:00:00"
 
@@ -213,3 +213,13 @@ def test_count_first_reviews_only_counts_cards_first_seen_that_day(cards, review
     review_log.add(_review(2, "2026-09-30T11:00:00"))
     review_log.add(_review(3, "2026-09-30T12:00:00"))  # card 3 first seen today
     assert review_log.count_first_reviews_on(TODAY) == 2
+
+
+# ----- SqliteSettingsStore -----
+
+def test_settings_store_returns_none_then_the_latest_value(conn):
+    settings = SqliteSettingsStore(lambda: conn)
+    assert settings.get("new_cards_per_day") is None
+    settings.set("new_cards_per_day", "10")
+    settings.set("new_cards_per_day", "20")
+    assert settings.get("new_cards_per_day") == "20"

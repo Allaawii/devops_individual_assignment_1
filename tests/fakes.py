@@ -7,7 +7,7 @@ from datetime import date, datetime
 from trainer.content.models import Sentence, Word
 from trainer.content.repository import SentenceRepository, WordRepository
 from trainer.scheduler.models import SENTENCE_CARD, WORD_CARD, Card, CardState, Review
-from trainer.scheduler.repository import CardRepository, ReviewLog
+from trainer.scheduler.repository import CardRepository, ReviewLog, SettingsStore
 
 
 class FakeSentenceRepository(SentenceRepository):
@@ -132,3 +132,14 @@ class FakeReviewLog(ReviewLog):
             if review.card_id not in first or review.reviewed_at < first[review.card_id]:
                 first[review.card_id] = review.reviewed_at
         return sum(1 for moment in first.values() if moment.date() == day)
+
+
+class FakeSettingsStore(SettingsStore):
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def set(self, key: str, value: str) -> None:
+        self.values[key] = value

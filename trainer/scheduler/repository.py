@@ -72,6 +72,18 @@ class ReviewLog(ABC):
         """Cards whose very first review was on `day`, i.e. new cards introduced that day."""
 
 
+class SettingsStore(ABC):
+    """Learner preferences stored as key/value text."""
+
+    @abstractmethod
+    def get(self, key: str) -> str | None:
+        """The stored value, or None if it was never set."""
+
+    @abstractmethod
+    def set(self, key: str, value: str) -> None:
+        """Store a value, replacing any earlier one."""
+
+
 class SqliteCardRepository(CardRepository):
     def __init__(self, get_conn: GetConnection) -> None:
         self._get_conn = get_conn
@@ -152,6 +164,22 @@ class SqliteReviewLog(ReviewLog):
             "WHERE date(first) = ?",
             (day.isoformat(),),
         ).fetchone()[0]
+
+
+class SqliteSettingsStore(SettingsStore):
+    def __init__(self, get_conn: GetConnection) -> None:
+        self._get_conn = get_conn
+
+    def get(self, key: str) -> str | None:
+        row = self._get_conn().execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set(self, key: str, value: str) -> None:
+        self._get_conn().execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
 
 
 def _to_card(row: sqlite3.Row) -> Card:
