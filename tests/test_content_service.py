@@ -181,3 +181,55 @@ def test_exactly_one_full_page_has_no_next_page(service):
 def test_page_below_1_counts_as_page_1(service):
     _add_many(service, 2)
     assert service.list_sentences(page=0) == service.list_sentences(page=1)
+
+
+# ----- placement quiz -----
+
+def _import_seed(service: ContentService, count: int) -> None:
+    rows = [(f"Frase número {i}.", f"Sentence {i}.", "tatoeba") for i in range(1, count + 1)]
+    service.import_seed(rows, {})
+
+
+def test_quiz_is_built_from_seed_sentences_only(service):
+    _import_seed(service, 50)
+    service.add_sentence("Mi propia frase.", "My own sentence.")
+    quiz = service.placement_quiz()
+    assert len(quiz) == 8
+    assert all(q.sentence_id <= 50 for q in quiz)
+
+
+def test_no_seed_means_no_quiz(service):
+    service.add_sentence("Mi propia frase.", "My own sentence.")
+    assert service.placement_quiz() == []
+
+
+def test_placement_level_checks_the_submitted_answers(service):
+    _import_seed(service, 50)
+    quiz = service.placement_quiz()
+    first_band_right = {q.field: q.answer for q in quiz if q.level == 0}
+    assert service.placement_level(first_band_right) == 1
+    assert service.placement_level({q.field: q.answer for q in quiz}) == 4
+
+
+def test_known_material_is_the_easiest_bands_with_their_words(service, word_repo):
+    _import_seed(service, 50)                      # bands of 10 sentences
+    sentence_ids, word_ids = service.known_material(1)
+    assert sentence_ids == list(range(1, 11))
+    numbers = {word_repo.get(word_id).headword for word_id in word_ids}
+    assert {"frase", "número", "uno"} - numbers == {"uno"}   # number digits are not words
+    assert service.known_material(0) == ([], [])
+
+# ----- key words -----
+
+def test_key_words_are_the_rarest_words_first(service):
+    service.import_seed([("El perro come pan aquí.", "The dog eats bread here.", "tatoeba")],
+                        {"aquí": 1, "come": 2, "perro": 3, "pan": 4})
+    detail = service.get_sentence(1)
+    assert [w.headword for w in detail.key_words()] == ["pan", "perro", "come"]
+    assert [w.headword for w in detail.key_words(limit=1)] == ["pan"]
+
+
+def test_unranked_words_count_as_rarest_and_keep_sentence_order(service):
+    service.import_seed([], {"come": 1})
+    service.add_sentence("El gato come pescado.", "The cat eats fish.")
+    assert [w.headword for w in service.get_sentence(1).key_words()] == ["gato", "pescado", "come"]

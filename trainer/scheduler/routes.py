@@ -1,4 +1,4 @@
-"""Dashboard, daily goal and review pages.
+"""Dashboard, daily goal, placement quiz and review pages.
 
 These are the only routes that use both domains (allowed by ADR-2): ReviewService picks the
 card by ID, then ContentService supplies the text to show. After a split this becomes one HTTP call.
@@ -8,6 +8,7 @@ from datetime import date, datetime
 
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
+from trainer.content.placement import DONT_KNOW, LEVELS
 from trainer.content.service import ContentService
 from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD
 from trainer.scheduler.models import SENTENCE_CARD, Card
@@ -32,8 +33,8 @@ def create_blueprint(reviews: ReviewService, content: ContentService) -> Bluepri
     def dashboard():
         if reviews.daily_goal() is None:
             return redirect(url_for("review.goal"))
-        return render_template("index.html", stats=reviews.stats(date.today()),
-                               goal=reviews.new_cards_per_day(), sentence_count=content.count_sentences())
+        return render_template("index.html", stats=reviews.stats(date.today()), goal=reviews.new_cards_per_day(),
+                               sentence_count=content.count_sentences(), level=_level_name(reviews.level()))
 
     @bp.get("/goal")
     def goal():
@@ -46,7 +47,18 @@ def create_blueprint(reviews: ReviewService, content: ContentService) -> Bluepri
             reviews.set_daily_goal(int(chosen))
         except (TypeError, ValueError):  # missing, not a number, or outside the allowed range
             return _goal_page(reviews, DAILY_GOAL_ERROR), 400
-        return redirect(url_for("review.dashboard"))
+        # A new learner goes on to the level quiz; someone changing their goal goes back home.
+        return redirect(url_for("review.placement" if reviews.level() is None else "review.dashboard"))
+
+    @bp.get("/placement")
+    def placement():
+        return render_template("review/placement.html", quiz=content.placement_quiz(), dont_know=DONT_KNOW)
+
+    @bp.post("/placement")
+    def submit_placement():
+        level = 0 if "skip" in request.form else content.placement_level(request.form)
+        skipped = reviews.place_learner(level, *content.known_material(level), date.today())
+        return render_template("review/placement_result.html", level=level, levels=LEVELS, skipped=skipped)
 
     @bp.get("/review")
     def show_card():
@@ -80,8 +92,13 @@ def _goal_page(reviews: ReviewService, error: str | None = None) -> str:
                            min_goal=MIN_DAILY_GOAL, max_goal=MAX_DAILY_GOAL)
 
 
+def _level_name(level: int | None) -> str | None:
+    return LEVELS[level] if level is not None else None
+
+
 def _card_content(card: Card, content: ContentService) -> dict:
     """The text for a card's two faces, fetched from the content domain by ID."""
     if card.card_type == SENTENCE_CARD:
-        return {"sentence": content.get_sentence(card.sentence_id).sentence}
+        detail = content.get_sentence(card.sentence_id)
+        return {"sentence": detail.sentence, "key_words": detail.key_words()}
     return {"word": content.get_word(card.word_id), "examples": content.example_sentences(card.word_id)}

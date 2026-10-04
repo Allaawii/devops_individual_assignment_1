@@ -4,7 +4,7 @@ It is also the Observer listener: create_app() subscribes on_sentence_added to
 ContentService, so every new sentence gets its cards without content importing this module.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from trainer.scheduler.algorithms import RATING_QUALITIES, SchedulingStrategy
 from trainer.scheduler.models import Card, CardState, Review, ReviewStats
@@ -14,6 +14,10 @@ DAILY_GOAL_KEY = "new_cards_per_day"
 MIN_DAILY_GOAL = 1
 MAX_DAILY_GOAL = 100
 DAILY_GOAL_ERROR = f"Choose a goal between {MIN_DAILY_GOAL} and {MAX_DAILY_GOAL} new cards a day."
+
+LEVEL_KEY = "level"
+KNOWN_FIRST_CHECK_DAYS = 60   # cards skipped by the placement quiz come back after 2 months...
+KNOWN_SPREAD_DAYS = 120       # ...spread over the next 4, so they never pile up on one day
 
 
 class ReviewService:
@@ -42,6 +46,26 @@ class ReviewService:
         """The learner's goal, or the NEW_CARDS_PER_DAY default until they choose one."""
         goal = self.daily_goal()
         return goal if goal is not None else self._default_new_cards_per_day
+
+    # ----- placement -----
+
+    def level(self) -> int | None:
+        """The level from the placement quiz (0 = Starter), or None before the learner takes or skips it."""
+        stored = self._settings.get(LEVEL_KEY)
+        return int(stored) if stored is not None else None
+
+    def place_learner(self, level: int, known_sentence_ids: list[int], known_word_ids: list[int],
+                      today: date) -> int:
+        """Save the level and treat the new cards the learner already knows as learned.
+
+        They aren't deleted: each one comes back once for a quick check, spread over a few
+        months so they never pile up on one day. Returns how many cards were skipped.
+        """
+        self._settings.set(LEVEL_KEY, str(level))
+        known = self._cards.new_cards_for(known_sentence_ids, known_word_ids)
+        for position, card in enumerate(known):
+            self._cards.save_state(card.id, _known_state(position, today))
+        return len(known)
 
     # ----- observer -----
 
@@ -89,3 +113,10 @@ class ReviewService:
 
     def _new_cards_left(self, today: date) -> int:
         return max(0, self.new_cards_per_day() - self._log.count_first_reviews_on(today))
+
+
+def _known_state(position: int, today: date) -> CardState:
+    """A skipped card looks as if it had been answered correctly twice, and is checked again
+    after KNOWN_FIRST_CHECK_DAYS plus up to KNOWN_SPREAD_DAYS, depending on its position."""
+    interval = KNOWN_FIRST_CHECK_DAYS + position % KNOWN_SPREAD_DAYS
+    return CardState(interval_days=interval, repetitions=2, due_date=today + timedelta(days=interval))

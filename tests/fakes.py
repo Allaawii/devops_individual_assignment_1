@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 from datetime import date, datetime
 
-from trainer.content.models import Sentence, Word
+from trainer.content.models import USER_SOURCE, Sentence, Word
 from trainer.content.repository import SentenceRepository, WordRepository
 from trainer.scheduler.models import SENTENCE_CARD, WORD_CARD, Card, CardState, Review
 from trainer.scheduler.repository import CardRepository, ReviewLog, SettingsStore
@@ -36,6 +36,9 @@ class FakeSentenceRepository(SentenceRepository):
         ids = sorted(s_id for s_id, w_id in self.links if w_id == word_id)
         return [self.rows[s_id] for s_id in ids[:limit]]
 
+    def seed(self) -> list[Sentence]:
+        return [s for s in sorted(self.rows.values(), key=lambda s: s.id) if s.source != USER_SOURCE]
+
 
 class FakeWordRepository(WordRepository):
     def __init__(self, links: set[tuple[int, int]]) -> None:
@@ -58,6 +61,10 @@ class FakeWordRepository(WordRepository):
 
     def for_sentence(self, sentence_id: int) -> list[Word]:
         return [self.rows[w_id] for s_id, w_id in sorted(self.links) if s_id == sentence_id]
+
+    def ids_in_sentences(self, sentence_ids: list[int]) -> list[int]:
+        wanted = set(sentence_ids)
+        return sorted({w_id for s_id, w_id in self.links if s_id in wanted})
 
     def list_page(self, limit: int, offset: int) -> list[Word]:
         return sorted(self.rows.values(), key=lambda w: w.id)[offset:offset + limit]
@@ -92,6 +99,10 @@ class FakeCardRepository(CardRepository):
 
     def next_new(self) -> Card | None:
         return min(self._new(), key=lambda card: card.id, default=None)
+
+    def new_cards_for(self, sentence_ids: list[int], word_ids: list[int]) -> list[Card]:
+        return [c for c in sorted(self._new(), key=lambda c: c.id)
+                if c.sentence_id in sentence_ids or c.word_id in word_ids]
 
     def save_state(self, card_id: int, state: CardState) -> None:
         self.rows[card_id] = replace(self.rows[card_id], state=state)

@@ -1,9 +1,11 @@
 """Offline tool: turn the Tatoeba Spanish-English export into the committed seed files.
 
 Run once by hand (never at app startup, never with network access):
-    python -m trainer.content.seed_build raw/spa-eng.zip --limit 2000
+    python -m trainer.content.seed_build raw/spa-eng.zip --per-level 600
 
-Sentences built from common words come first, so the easiest ones reach the learner first.
+A sentence is as hard as its rarest word. The seed has one tier per placement level, from
+everyday words to rarer vocabulary, and lists them easiest first, so a beginner meets the
+common words first while an intermediate learner (placed by the quiz) gets real material.
 """
 
 import argparse
@@ -19,7 +21,19 @@ from trainer.content.tokenizer import WORD_PATTERN, extract_words
 MIN_TOKENS = 3
 MAX_TOKENS = 12
 MAX_PER_RAREST_WORD = 3  # without this cap, 2,000 sentences reuse only ~100 very common words
-DEFAULT_LIMIT = 2000
+
+
+@dataclass(frozen=True)
+class Tier:
+    max_rank: int     # the sentence's rarest word is at most this rank (and above the previous tier's)
+    min_tokens: int   # harder tiers also need longer sentences, so they bring harder grammar too
+
+
+# Starter, Beginner, Elementary, Intermediate, Advanced: one tier per placement level
+# (placement.LEVELS cuts the seed into as many equal bands). Words rarer than rank 10,000 are
+# mostly typos and one-off names, so no tier goes beyond it.
+TIERS = (Tier(300, 3), Tier(1000, 3), Tier(2500, 4), Tier(5000, 6), Tier(10000, 7))
+DEFAULT_PER_LEVEL = 600
 DEFAULT_OUT_DIR = Path(__file__).parent / "seed"
 
 
@@ -74,7 +88,7 @@ def difficulty(candidate: Candidate, ranks: dict[str, int]) -> tuple[int, int]:
     return max(ranks[word] for word in candidate.words), candidate.length
 
 
-def select_varied(ordered: Iterable[Candidate], ranks: dict[str, int], limit: int) -> list[Candidate]:
+def select_varied(ordered: Iterable[Candidate], ranks: dict[str, int]) -> list[Candidate]:
     """Walk the sentences easiest first, keeping at most MAX_PER_RAREST_WORD per rarest word.
 
     Each word still gets a few example sentences, but the seed keeps moving on to new
@@ -87,13 +101,36 @@ def select_varied(ordered: Iterable[Candidate], ranks: dict[str, int], limit: in
         if uses[rarest_rank] < MAX_PER_RAREST_WORD:
             uses[rarest_rank] += 1
             chosen.append(candidate)
-            if len(chosen) == limit:
-                break
     return chosen
 
 
-def build_seed(lines: Iterable[str], limit: int) -> tuple[list[Candidate], dict[str, int]]:
-    """The whole pipeline: parse, filter, deduplicate, rank, sort easiest first, and pick a varied `limit`.
+def select_tiered(ordered: list[Candidate], ranks: dict[str, int], per_level: int,
+                  tiers: tuple[Tier, ...] = TIERS) -> list[Candidate]:
+    """Up to `per_level` varied sentences from each tier, spread across the whole tier, easiest first.
+
+    Spreading matters: the first 600 sentences of the Intermediate tier would only reach a few
+    hundred words past its start, while evenly spaced ones cover all of it.
+    """
+    chosen: list[Candidate] = []
+    lower = 0
+    for tier in tiers:
+        in_tier = [c for c in ordered
+                   if lower < difficulty(c, ranks)[0] <= tier.max_rank and c.length >= tier.min_tokens]
+        chosen += spread_evenly(select_varied(in_tier, ranks), per_level)
+        lower = tier.max_rank
+    return chosen
+
+
+def spread_evenly(items: list[Candidate], count: int) -> list[Candidate]:
+    """`count` items at evenly spaced positions (all of them if there are fewer), order kept."""
+    if len(items) <= count:
+        return items
+    return [items[i * len(items) // count] for i in range(count)]
+
+
+def build_seed(lines: Iterable[str], per_level: int,
+               tiers: tuple[Tier, ...] = TIERS) -> tuple[list[Candidate], dict[str, int]]:
+    """The whole pipeline: parse, filter, deduplicate, rank, sort easiest first, and pick each tier.
 
     Returns the chosen sentences in learning order, and the ranks of the words they use.
     """
@@ -101,7 +138,7 @@ def build_seed(lines: Iterable[str], limit: int) -> tuple[list[Candidate], dict[
     candidates = deduplicate(c for c in parsed if c is not None and is_suitable(c))
     ranks = frequency_ranks(candidates)
     ordered = sorted(candidates, key=lambda c: difficulty(c, ranks))
-    chosen = select_varied(ordered, ranks, limit)
+    chosen = select_tiered(ordered, ranks, per_level, tiers)
     used_words = {word for candidate in chosen for word in candidate.words}
     return chosen, {word: rank for word, rank in ranks.items() if word in used_words}
 
@@ -129,11 +166,11 @@ def _write_tsv(path: Path, rows: Iterable[tuple]) -> None:
 def main(argv: list[str] | None = None) -> None:  # pragma: no cover
     parser = argparse.ArgumentParser(description="Build the seed files from the Tatoeba export.")
     parser.add_argument("zip_path", type=Path, help="path to the downloaded spa-eng.zip")
-    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="number of sentences to keep")
+    parser.add_argument("--per-level", type=int, default=DEFAULT_PER_LEVEL, help="sentences in each tier")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     args = parser.parse_args(argv)
 
-    chosen, ranks = build_seed(read_lines(args.zip_path), args.limit)
+    chosen, ranks = build_seed(read_lines(args.zip_path), args.per_level)
     write_seed(args.out_dir, chosen, ranks)
     print(f"Wrote {len(chosen)} sentences and {len(ranks)} words to {args.out_dir}")
 

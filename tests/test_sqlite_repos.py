@@ -76,6 +76,13 @@ def test_containing_word_returns_linked_sentences_up_to_limit(sentences, words):
     assert [s.spanish_text for s in found] == ["El gato come", "Mi gato duerme"]
 
 
+def test_seed_skips_sentences_added_by_the_learner(sentences):
+    _add(sentences, "Mía")
+    seeded = sentences.add(spanish_text="Hola", english_text="Hello", grammar_note=None,
+                           source="tatoeba", created_at=CREATED_AT)
+    assert sentences.seed() == [seeded]
+
+
 # ----- SqliteWordRepository -----
 
 def test_get_or_create_inserts_once(words):
@@ -117,6 +124,18 @@ def test_list_page_puts_empty_meanings_first_then_rank_then_unranked(words):
     words.set_meaning(words.get_or_create("casa").id, "house")    # has a meaning
     order = [w.headword for w in words.list_page(limit=10, offset=0)]
     assert order == ["perro", "gato", "zapato", "casa"]
+
+
+def test_ids_in_sentences_lists_each_word_once_across_batches(sentences, words, monkeypatch):
+    monkeypatch.setattr("trainer.db.IN_BATCH_SIZE", 1)     # force one query per sentence
+    gato, perro = words.get_or_create("gato"), words.get_or_create("perro")
+    first, second, other = _add(sentences, "Uno"), _add(sentences, "Dos"), _add(sentences, "Tres")
+    words.link(first.id, perro.id)
+    words.link(second.id, perro.id)
+    words.link(second.id, gato.id)
+    words.link(other.id, words.get_or_create("casa").id)
+    assert words.ids_in_sentences([first.id, second.id]) == [gato.id, perro.id]
+    assert words.ids_in_sentences([]) == []
 
 
 # ----- transactions -----
@@ -193,6 +212,15 @@ def test_next_new_picks_the_lowest_id(cards):
 def test_no_due_or_new_cards_returns_none(cards):
     assert cards.next_due(TODAY) is None
     assert cards.next_new() is None
+
+
+def test_new_cards_for_returns_only_new_cards_of_the_given_content(cards):
+    cards.ensure_sentence_card(1)            # id 1
+    cards.ensure_word_cards([10, 11, 12])    # ids 2-4
+    cards.save_state(3, CardState(interval_days=1, repetitions=1, due_date=TODAY))  # word 11 already reviewed
+    found = cards.new_cards_for([1], [10, 11])
+    assert [card.id for card in found] == [1, 2]
+    assert cards.new_cards_for([], []) == []
 
 
 # ----- SqliteReviewLog -----

@@ -9,6 +9,7 @@ from flask import Flask, current_app, g
 
 DB_FILENAME = "trainer.db"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+IN_BATCH_SIZE = 500  # well under SQLite's oldest limit of 999 placeholders per statement
 
 GetConnection = Callable[[], sqlite3.Connection]
 
@@ -39,6 +40,17 @@ class SqliteRepository:
     def _scalar(self, sql: str, params: Sequence[Any] = ()) -> Any:
         """The first value of the first row, e.g. the result of COUNT(*)."""
         return self._fetch_one(sql, params)[0]
+
+    def _fetch_all_in(self, sql: str, ids: Sequence[int]) -> list[sqlite3.Row]:
+        """Run `sql`, whose `{ids}` marks an `IN (...)` list, for any number of ids.
+
+        SQLite limits how many ? placeholders one statement may have, so the ids are sent in batches.
+        """
+        rows: list[sqlite3.Row] = []
+        for start in range(0, len(ids), IN_BATCH_SIZE):
+            batch = ids[start:start + IN_BATCH_SIZE]
+            rows += self._fetch_all(sql.format(ids=", ".join("?" * len(batch))), batch)
+        return rows
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
