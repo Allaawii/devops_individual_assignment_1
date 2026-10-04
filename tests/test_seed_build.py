@@ -5,7 +5,7 @@ import zipfile
 
 from trainer.content.seed_build import (
     Candidate, build_seed, deduplicate, difficulty, frequency_ranks, is_suitable,
-    parse_line, read_lines, write_seed,
+    parse_line, read_lines, select_varied, write_seed,
 )
 
 ATTRIBUTION = "CC-BY 2.0 (France) Attribution: tatoeba.org #2877 (CM) & #1004 (sabretou)"
@@ -92,6 +92,14 @@ def test_sentences_built_from_common_words_come_first():
 def test_shorter_sentence_wins_a_tie():
     chosen, _ = build_seed([_line("x", "El gato come el pan."), _line("x", "Gato come pan.")], limit=10)
     assert [c.spanish for c in chosen] == ["Gato come pan.", "El gato come el pan."]
+
+
+def test_at_most_three_sentences_share_the_same_rarest_word():
+    ranks = {"gato": 1, "come": 2, "pan": 3}
+    same_rarest = [_candidate(text) for text in ["Gato come.", "El gato come.", "Un gato come.", "Mi gato come."]]
+    new_word = _candidate("Gato come pan.")
+    chosen = select_varied(same_rarest + [new_word], ranks, limit=10)
+    assert chosen == same_rarest[:3] + [new_word]   # the 4th "come" sentence is skipped for new vocabulary
 
 
 def test_limit_is_respected_and_only_used_words_keep_a_rank():

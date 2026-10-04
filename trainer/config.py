@@ -2,6 +2,9 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+BUNDLED_SEED_DIR = str(Path(__file__).parent / "content" / "seed")
 
 
 @dataclass
@@ -12,6 +15,7 @@ class Config:
     data_dir: str = "./data"
     scheduler: str = "sm2"
     new_cards_per_day: int = 15
+    seed_dir: str = BUNDLED_SEED_DIR  # not an env var; tests point it at an empty folder
 
     @classmethod
     def from_env(cls) -> "Config":

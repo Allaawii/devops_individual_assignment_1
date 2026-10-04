@@ -18,6 +18,7 @@ from trainer.content.tokenizer import WORD_PATTERN, extract_words
 
 MIN_TOKENS = 3
 MAX_TOKENS = 12
+MAX_PER_RAREST_WORD = 3  # without this cap, 2,000 sentences reuse only ~100 very common words
 DEFAULT_LIMIT = 2000
 DEFAULT_OUT_DIR = Path(__file__).parent / "seed"
 
@@ -73,15 +74,34 @@ def difficulty(candidate: Candidate, ranks: dict[str, int]) -> tuple[int, int]:
     return max(ranks[word] for word in candidate.words), candidate.length
 
 
+def select_varied(ordered: Iterable[Candidate], ranks: dict[str, int], limit: int) -> list[Candidate]:
+    """Walk the sentences easiest first, keeping at most MAX_PER_RAREST_WORD per rarest word.
+
+    Each word still gets a few example sentences, but the seed keeps moving on to new
+    vocabulary instead of filling up with sentences built from the same handful of words.
+    """
+    chosen: list[Candidate] = []
+    uses: Counter[int] = Counter()
+    for candidate in ordered:
+        rarest_rank = difficulty(candidate, ranks)[0]
+        if uses[rarest_rank] < MAX_PER_RAREST_WORD:
+            uses[rarest_rank] += 1
+            chosen.append(candidate)
+            if len(chosen) == limit:
+                break
+    return chosen
+
+
 def build_seed(lines: Iterable[str], limit: int) -> tuple[list[Candidate], dict[str, int]]:
-    """The whole pipeline: parse, filter, deduplicate, rank, sort, and keep the easiest `limit`.
+    """The whole pipeline: parse, filter, deduplicate, rank, sort easiest first, and pick a varied `limit`.
 
     Returns the chosen sentences in learning order, and the ranks of the words they use.
     """
     parsed = (parse_line(line) for line in lines)
     candidates = deduplicate(c for c in parsed if c is not None and is_suitable(c))
     ranks = frequency_ranks(candidates)
-    chosen = sorted(candidates, key=lambda c: difficulty(c, ranks))[:limit]
+    ordered = sorted(candidates, key=lambda c: difficulty(c, ranks))
+    chosen = select_varied(ordered, ranks, limit)
     used_words = {word for candidate in chosen for word in candidate.words}
     return chosen, {word: rank for word, rank in ranks.items() if word in used_words}
 

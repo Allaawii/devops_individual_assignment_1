@@ -1,11 +1,14 @@
 """Composition root: the only place that knows about both domains and wires them together."""
 
+from pathlib import Path
+
 from flask import Flask, jsonify
 
 from trainer import db
 from trainer.config import Config
 from trainer.content.repository import SqliteSentenceRepository, SqliteWordRepository
 from trainer.content.routes import create_blueprint as create_content_blueprint
+from trainer.content.seed import load_seed_if_empty
 from trainer.content.service import ContentService
 from trainer.scheduler.algorithms import get_strategy
 from trainer.scheduler.repository import SqliteCardRepository, SqliteReviewLog, SqliteSettingsStore
@@ -25,6 +28,8 @@ def create_app(config: Config | None = None) -> Flask:
     review_service = ReviewService(SqliteCardRepository(db.get_db), SqliteReviewLog(db.get_db),
                                    SqliteSettingsStore(db.get_db), strategy, config.new_cards_per_day)
     content_service.subscribe(review_service.on_sentence_added)
+    with app.app_context():  # leaving the context commits once, so the import is one transaction
+        load_seed_if_empty(content_service, Path(config.seed_dir))
     app.extensions["content_service"] = content_service
     app.extensions["review_service"] = review_service
     app.register_blueprint(create_content_blueprint(content_service))
