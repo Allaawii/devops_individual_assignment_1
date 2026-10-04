@@ -37,3 +37,7 @@ def test_only_stopwords_gives_empty_list():
 
 def test_stopwords_are_all_lowercase():
     assert all(word == word.lower() for word in STOPWORDS)
+
+
+def test_corpus_names_are_not_vocabulary():
+    assert extract_words("Tom y Mary comen pan.") == ["comen", "pan"]

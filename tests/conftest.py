@@ -23,8 +23,8 @@ def conn(tmp_path) -> Iterator[sqlite3.Connection]:
 
 @pytest.fixture
 def app(tmp_path) -> Flask:
-    """The real app on a fresh database. DATA_DIR doesn't exist yet, so creating it is exercised too."""
-    return create_app(Config(data_dir=str(tmp_path / "nested" / "data")))
+    """The real app on a fresh, empty database (no seed). DATA_DIR doesn't exist yet, so creating it is exercised too."""
+    return create_app(Config(data_dir=str(tmp_path / "nested" / "data"), seed_dir=str(tmp_path / "no-seed")))
 
 
 @pytest.fixture

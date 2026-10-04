@@ -11,12 +11,17 @@ STOPWORDS = frozenset({
     "este", "esta", "eso",
 })
 
+# Names the Tatoeba corpus uses in thousands of sentences. They aren't Spanish vocabulary.
+NAMES = frozenset({"tom", "mary"})
+
+IGNORED = STOPWORDS | NAMES
+
 # Runs of Spanish letters. Punctuation (¿¡.,!?), quotes and digits are not matched.
 WORD_PATTERN = re.compile(r"[a-záéíóúüñ]+")
 
 
 def extract_words(text: str) -> list[str]:
-    """Return the lowercase non-stopwords in `text`, without duplicates, in order of appearance."""
+    """Return the lowercase words worth learning in `text`, without duplicates, in order of appearance."""
     tokens = WORD_PATTERN.findall(text.lower())
-    content_words = [token for token in tokens if token not in STOPWORDS]
+    content_words = [token for token in tokens if token not in IGNORED]
     return list(dict.fromkeys(content_words))
