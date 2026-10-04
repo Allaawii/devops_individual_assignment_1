@@ -8,9 +8,9 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/">Spanish trainer</a>
+    <a class="brand" href="{{ url_for('review.dashboard') }}">Spanish trainer</a>
     <nav>
-      <a href="/review">Review</a>
+      <a href="{{ url_for('review.show_card') }}">Review</a>
       <a href="{{ url_for('content.list_sentences') }}">Sentences</a>
       <a href="{{ url_for('content.list_words') }}">Words</a>
       <a href="{{ url_for('content.new_sentence') }}">Add sentence</a>

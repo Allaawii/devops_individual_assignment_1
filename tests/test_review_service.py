@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from tests.fakes import FakeCardRepository, FakeReviewLog
-from trainer.scheduler.algorithms import GOOD, SchedulingStrategy, SM2Strategy
+from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD, SchedulingStrategy, SM2Strategy
 from trainer.scheduler.models import SENTENCE_CARD, WORD_CARD, CardState
 from trainer.scheduler.service import ReviewService
 
@@ -152,6 +152,18 @@ def test_invalid_quality_saves_and_logs_nothing(service, cards, log):
     with pytest.raises(ValueError):
         service.review(1, 9, NOW)
     assert cards.get(1).state == CardState()
+    assert log.reviews == []
+
+
+# ----- preview_intervals -----
+
+def test_preview_shows_each_rating_interval_without_saving(service, cards, log):
+    service.on_sentence_added(1, [])
+    learned = CardState(ease_factor=2.5, interval_days=6, repetitions=2, due_date=TODAY)
+    cards.save_state(1, learned)
+    preview = service.preview_intervals(cards.get(1), TODAY)
+    assert preview == {AGAIN: 1, HARD: 15, GOOD: 15, EASY: 15}
+    assert cards.get(1).state == learned
     assert log.reviews == []
 
 

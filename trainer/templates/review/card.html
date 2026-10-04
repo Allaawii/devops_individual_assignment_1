@@ -1,12 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Review · Spanish trainer{% endblock %}
 {% block content %}
+{% set done = stats.reviewed_today %}
+{% set remaining = stats.due_now + stats.new_left_today %}
+<div class="session">
+  <progress value="{{ done }}" max="{{ done + remaining }}" aria-label="Today's progress"></progress>
+  <span class="muted">{{ done }} done · {{ remaining }} to go</span>
+</div>
+
 <div class="card">
   <p class="muted">{{ "Sentence" if sentence else "Word" }} card</p>
   <p class="front" lang="es">{{ sentence.spanish_text if sentence else word.headword }}</p>
 
   <details>
-    <summary>Show answer</summary>
+    <summary accesskey="s">Show answer</summary>
     <div class="back">
       {% if sentence %}
         <p>{{ sentence.english_text }}</p>
@@ -24,11 +31,15 @@
 
       <form method="post" action="{{ url_for('review.rate', card_id=card.id) }}" class="ratings">
         {% for label, quality in ratings %}
-        <button type="submit" name="quality" value="{{ quality }}"{% if label != "Good" %} class="secondary"{% endif %}>{{ label }}</button>
+        <button type="submit" name="quality" value="{{ quality }}" accesskey="{{ loop.index }}"
+                {%- if label != "Good" %} class="secondary"{% endif %}>
+          {{ label }} <span class="interval">{{ intervals[quality] }}d</span>
+        </button>
         {% endfor %}
       </form>
+      <p class="hint">Each button shows when you'll see this card again.</p>
     </div>
   </details>
 </div>
-<p class="muted">{{ stats.due_now }} due · {{ stats.new_left_today }} new left today</p>
+<p class="hint">Keyboard: Alt+S shows the answer, Alt+1 to Alt+4 rate it (Alt+Shift in Firefox).</p>
 {% endblock %}
