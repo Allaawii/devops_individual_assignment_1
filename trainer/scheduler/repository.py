@@ -39,6 +39,10 @@ class CardRepository(ABC):
         """The never-reviewed card with the lowest id, or None."""
 
     @abstractmethod
+    def new_cards_for(self, sentence_ids: list[int], word_ids: list[int]) -> list[Card]:
+        """The never-reviewed cards of these sentences and words, in id order."""
+
+    @abstractmethod
     def save_state(self, card_id: int, state: CardState) -> None:
         """Store the card's new scheduling state."""
 
@@ -102,6 +106,14 @@ class SqliteCardRepository(SqliteRepository, CardRepository):
 
     def next_new(self) -> Card | None:
         return self._card(f"SELECT {CARD_COLUMNS} FROM cards WHERE due_date IS NULL ORDER BY id LIMIT 1")
+
+    def new_cards_for(self, sentence_ids: list[int], word_ids: list[int]) -> list[Card]:
+        rows = []
+        for column, ids in (("sentence_id", sentence_ids), ("word_id", word_ids)):
+            # {{ids}} survives the f-string as {ids}, which _fetch_all_in fills with placeholders.
+            rows += self._fetch_all_in(
+                f"SELECT {CARD_COLUMNS} FROM cards WHERE due_date IS NULL AND {column} IN ({{ids}})", ids)
+        return sorted((_to_card(row) for row in rows), key=lambda card: card.id)
 
     def save_state(self, card_id: int, state: CardState) -> None:
         self._execute(

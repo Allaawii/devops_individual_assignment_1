@@ -7,7 +7,7 @@ Repositories never commit; the request teardown in trainer.db does.
 import sqlite3
 from abc import ABC, abstractmethod
 
-from trainer.content.models import Sentence, Word
+from trainer.content.models import USER_SOURCE, Sentence, Word
 from trainer.db import SqliteRepository
 
 SENTENCE_COLUMNS = "s.id, s.spanish_text, s.english_text, s.grammar_note, s.source, s.created_at"
@@ -42,6 +42,10 @@ class SentenceRepository(ABC):
     def containing_word(self, word_id: int, limit: int) -> list[Sentence]:
         """Up to `limit` sentences that contain the word, in id order."""
 
+    @abstractmethod
+    def seed(self) -> list[Sentence]:
+        """Every sentence that came with the app (not added by the learner), easiest first."""
+
 
 class WordRepository(ABC):
     """Stores words and which sentences they appear in."""
@@ -61,6 +65,10 @@ class WordRepository(ABC):
     @abstractmethod
     def for_sentence(self, sentence_id: int) -> list[Word]:
         """The words linked to a sentence, in id order."""
+
+    @abstractmethod
+    def ids_in_sentences(self, sentence_ids: list[int]) -> list[int]:
+        """The ids of every word used in any of the sentences, each once, in id order."""
 
     @abstractmethod
     def list_page(self, limit: int, offset: int) -> list[Word]:
@@ -110,6 +118,12 @@ class SqliteSentenceRepository(SqliteRepository, SentenceRepository):
         )
         return [_to_sentence(row) for row in rows]
 
+    def seed(self) -> list[Sentence]:
+        # The seed is imported in difficulty order, so id order is easiest first.
+        rows = self._fetch_all(f"SELECT {SENTENCE_COLUMNS} FROM sentences s WHERE s.source != ? ORDER BY s.id",
+                               (USER_SOURCE,))
+        return [_to_sentence(row) for row in rows]
+
 
 class SqliteWordRepository(SqliteRepository, WordRepository):
     def get_or_create(self, headword: str) -> Word:
@@ -133,6 +147,11 @@ class SqliteWordRepository(SqliteRepository, WordRepository):
             (sentence_id,),
         )
         return [_to_word(row) for row in rows]
+
+    def ids_in_sentences(self, sentence_ids: list[int]) -> list[int]:
+        rows = self._fetch_all_in("SELECT DISTINCT word_id FROM sentence_words WHERE sentence_id IN ({ids})",
+                                  sentence_ids)
+        return sorted({row["word_id"] for row in rows})  # a set, because batches can repeat a word
 
     def list_page(self, limit: int, offset: int) -> list[Word]:
         rows = self._fetch_all(

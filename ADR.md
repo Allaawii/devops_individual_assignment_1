@@ -29,7 +29,7 @@ Status: Decided
 Context: The core logic must be checked quickly and repeatably, and scheduling results depend on the date.
 Decision: Scheduling strategies are pure and take today as a parameter; services depend on abstract repositories, so their tests use in-memory fakes; the SQLite repositories are tested separately against a temporary database. Routes and seed loading are excluded from the coverage number (.coveragerc) and only smoke-tested.
 Alternatives considered: Mainly end-to-end tests through Flask requests (rejected: slower, and a failure is hard to trace to one piece).
-Consequences: Fast tests with about 99% coverage of the core logic. The cost is keeping the fakes in line with the real repositories, and the coverage number openly leaves out the routes.
+Consequences: Fast tests (251 in about 10 s) with 100% coverage of the trainer package. The cost is keeping the fakes in line with the real repositories, and the coverage number openly leaves out the routes.
 
 ## 5. No gamification
 Date: 2026-10-02

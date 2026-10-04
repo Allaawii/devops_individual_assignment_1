@@ -56,9 +56,9 @@ def test_missing_seed_files_start_an_empty_app(tmp_path):
         assert content.count_sentences() == 0
 
 
-def test_the_committed_seed_loads_2000_sentences(tmp_path):
+def test_the_committed_seed_loads_3000_sentences_in_five_tiers(tmp_path):
     app = _start(tmp_path, BUNDLED_SEED_DIR)
     content, reviews = _services(app)
     with app.app_context():
-        assert content.count_sentences() == 2000
-        assert reviews.stats(TODAY).total_cards > 2000  # every sentence plus its words
+        assert content.count_sentences() == 3000
+        assert reviews.stats(TODAY).total_cards > 3000  # every sentence plus its words

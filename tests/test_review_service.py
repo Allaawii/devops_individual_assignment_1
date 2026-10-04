@@ -7,7 +7,7 @@ import pytest
 from tests.fakes import FakeCardRepository, FakeReviewLog, FakeSettingsStore
 from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD, SchedulingStrategy, SM2Strategy
 from trainer.scheduler.models import SENTENCE_CARD, WORD_CARD, CardState
-from trainer.scheduler.service import ReviewService
+from trainer.scheduler.service import KNOWN_FIRST_CHECK_DAYS, ReviewService
 
 TODAY = date(2026, 9, 30)
 NOW = datetime(2026, 9, 30, 18, 0, 0)
@@ -211,3 +211,45 @@ def test_stats(cards, log):
     assert stats.new_left_today == 1           # 2 new cards remain, but only 1 left in today's limit
     assert stats.reviewed_today == 1
     assert stats.total_cards == 4
+
+
+# ----- placement -----
+
+def test_level_is_none_until_the_learner_is_placed(service):
+    assert service.level() is None
+
+
+def test_placing_saves_the_level_and_skips_only_the_known_new_cards(service, cards):
+    service.on_sentence_added(1, [10, 11])     # cards 1-3: known
+    service.on_sentence_added(2, [12])         # cards 4-5: not known
+    skipped = service.place_learner(2, [1], [10, 11], TODAY)
+    assert skipped == 3
+    assert service.level() == 2
+    assert cards.count_new() == 2
+    assert service.next_card(TODAY).sentence_id == 2   # learning starts after the known material
+
+
+def test_skipped_cards_come_back_for_a_check_spread_over_the_months(service, cards):
+    service.on_sentence_added(1, [10, 11])
+    service.place_learner(1, [1], [10, 11], TODAY)
+    due_dates = [card.state.due_date for card in cards.rows.values()]
+    assert due_dates == [TODAY + timedelta(days=days) for days in (KNOWN_FIRST_CHECK_DAYS,
+                                                                  KNOWN_FIRST_CHECK_DAYS + 1,
+                                                                  KNOWN_FIRST_CHECK_DAYS + 2)]
+    assert all(card.state.repetitions == 2 for card in cards.rows.values())
+    assert service.stats(TODAY).due_now == 0
+
+
+def test_placing_never_touches_cards_already_reviewed(service, cards):
+    service.on_sentence_added(1, [10])
+    service.review(1, AGAIN, NOW)
+    reviewed = cards.get(1).state
+    assert service.place_learner(1, [1], [10], TODAY) == 1     # only the word card
+    assert cards.get(1).state == reviewed
+
+
+def test_level_0_skips_nothing(service, cards):
+    service.on_sentence_added(1, [10])
+    assert service.place_learner(0, [], [], TODAY) == 0
+    assert service.level() == 0
+    assert cards.count_new() == 2

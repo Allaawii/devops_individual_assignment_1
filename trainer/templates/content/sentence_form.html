@@ -1,18 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Add sentence · Spanish trainer{% endblock %}
+{% block title %}Add sentence · Frase{% endblock %}
 {% block content %}
-<h1>Add a sentence</h1>
-{% if error %}<p class="error">{{ error }}</p>{% endif %}
-<form method="post" class="stack">
-  <label>Spanish
-    <input name="spanish" lang="es" value="{{ form.spanish }}" placeholder="Ojalá llueva mañana." required>
-  </label>
-  <label>English
-    <input name="english" value="{{ form.english }}" placeholder="I hope it rains tomorrow." required>
-  </label>
-  <label>Grammar note <span class="hint">Optional. Left blank, it's filled in when a grammar rule matches.</span>
-    <input name="grammar_note" value="{{ form.grammar_note }}">
-  </label>
-  <button type="submit">Save sentence</button>
-</form>
+<div class="narrow">
+  <div class="page-head">
+    <h1>Add a sentence</h1>
+    <p>Found a sentence you like? Save it and it becomes cards, one for the sentence and one for each new word.</p>
+  </div>
+  <div class="panel">
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+    <form method="post" class="form">
+      <label class="field">Spanish
+        <input name="spanish" lang="es" value="{{ form.spanish }}" placeholder="Ojalá llueva mañana." required>
+      </label>
+      <label class="field">English
+        <input name="english" value="{{ form.english }}" placeholder="I hope it rains tomorrow." required>
+      </label>
+      <label class="field">Grammar note <span class="hint">Optional. Left blank, it's filled in when a grammar rule matches.</span>
+        <input name="grammar_note" value="{{ form.grammar_note }}">
+      </label>
+      <div class="actions"><button type="submit">Save sentence</button></div>
+    </form>
+  </div>
+</div>
 {% endblock %}

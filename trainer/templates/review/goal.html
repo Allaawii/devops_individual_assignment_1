@@ -1,31 +1,35 @@
 {% extends "base.html" %}
-{% block title %}Daily goal · Spanish trainer{% endblock %}
+{% block title %}Daily goal · Frase{% endblock %}
 {% block content %}
-<div class="card">
+<div class="narrow panel">
   {% if first_time %}
-  <h1>Welcome</h1>
-  <p>How much do you want to learn each day? This sets how many <strong>new</strong> cards (words and sentences) you get per day.
+  <h1>Welcome to Frase</h1>
+  <p class="muted">How much do you want to learn each day? This sets how many <strong>new</strong> cards (words and sentences) you get per day.
      Cards you've already seen keep coming back when they're due, so a smaller goal means shorter sessions later too.</p>
   {% else %}
   <h1>Daily goal</h1>
-  <p>You currently get <strong>{{ current }}</strong> new cards a day. Change it any time.</p>
+  <p class="muted">You currently get <strong>{{ current }}</strong> new cards a day. Change it any time.</p>
   {% endif %}
 
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
 
-  <form method="post" class="stack">
-    <div class="goals">
+  <form method="post" class="form">
+    <div class="choices">
       {% for amount, name in presets %}
-      <label class="goal-option">
+      {% set intensity = loop.index %}
+      <label class="choice">
         <input type="radio" name="goal" value="{{ amount }}"{% if amount == current %} checked{% endif %}>
-        <span><strong>{{ name }}</strong><br><span class="muted">{{ amount }} new cards a day</span></span>
+        <span class="choice-number">{{ amount }}</span>
+        <span class="choice-name">{{ name }}</span>
+        <span class="choice-sub">cards per day</span>
+        <span class="bars" aria-hidden="true">{% for step in range(presets|length) %}<i{% if step < intensity %} class="on"{% endif %}></i>{% endfor %}</span>
       </label>
       {% endfor %}
     </div>
-    <label>Or choose your own number ({{ min_goal }}-{{ max_goal }})
-      <input type="number" name="custom" min="{{ min_goal }}" max="{{ max_goal }}" inputmode="numeric">
+    <label class="field">Or choose your own number <span class="hint">Between {{ min_goal }} and {{ max_goal }}. It wins over the choice above.</span>
+      <input type="number" name="custom" min="{{ min_goal }}" max="{{ max_goal }}" inputmode="numeric" placeholder="e.g. 15">
     </label>
-    <button type="submit">{{ "Start learning" if first_time else "Save goal" }}</button>
+    <div class="actions"><button type="submit" class="btn-lg">{{ "Start learning →" if first_time else "Save goal" }}</button></div>
   </form>
 </div>
 {% endblock %}

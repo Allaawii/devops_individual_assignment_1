@@ -5,11 +5,12 @@ subscribed listener with the new sentence id and its word ids. This is how the
 scheduler learns about new content without the content package importing it.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 
 from trainer.content.grammar_rules import tag_grammar
-from trainer.content.models import Page, Sentence, SentenceDetail, T, Word
+from trainer.content.models import USER_SOURCE, Page, Sentence, SentenceDetail, T, Word
+from trainer.content.placement import Question, build_quiz, score, sentences_below
 from trainer.content.repository import SentenceRepository, WordRepository
 from trainer.content.tokenizer import extract_words
 
@@ -41,7 +42,7 @@ class ContentService:
     # ----- writing -----
 
     def add_sentence(self, spanish: str, english: str, grammar_note: str | None = None,
-                     source: str = "user") -> Sentence:
+                     source: str = USER_SOURCE) -> Sentence:
         """Validate and store a sentence, link its words, then notify listeners.
 
         Raises ValueError if either text is empty or the Spanish text already exists.
@@ -106,6 +107,21 @@ class ContentService:
     def list_words(self, page: int) -> Page[Word]:
         """One page of words: those still missing a meaning first, then by frequency rank."""
         return _paginate(self._words.list_page, page)
+
+    # ----- placement quiz -----
+
+    def placement_quiz(self) -> list[Question]:
+        """The level quiz built from the seed; empty if there aren't enough seed sentences."""
+        return build_quiz(self._sentences.seed())
+
+    def placement_level(self, answers: Mapping[str, str]) -> int:
+        """Check the submitted quiz answers and return the learner's level (0 = Starter)."""
+        return score(self.placement_quiz(), answers)
+
+    def known_material(self, level: int) -> tuple[list[int], list[int]]:
+        """(sentence ids, word ids) of the seed below `level`, which the learner can skip."""
+        sentence_ids = [sentence.id for sentence in sentences_below(self._sentences.seed(), level)]
+        return sentence_ids, self._words.ids_in_sentences(sentence_ids)
 
 
 def _blank_to_none(text: str | None) -> str | None:
