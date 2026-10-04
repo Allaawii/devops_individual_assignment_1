@@ -11,6 +11,7 @@ from trainer.scheduler.models import CardState
 
 # Review buttons and the quality score (0-5) each one sends.
 AGAIN, HARD, GOOD, EASY = 0, 3, 4, 5
+RATING_QUALITIES = (AGAIN, HARD, GOOD, EASY)  # in button order
 
 PASSING_QUALITY = 3       # below this, the card was forgotten (a lapse)
 MIN_EASE = 1.3

@@ -6,11 +6,9 @@ Repositories never commit; the request teardown in trainer.db does.
 
 import sqlite3
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 
 from trainer.content.models import Sentence, Word
-
-GetConnection = Callable[[], sqlite3.Connection]
+from trainer.db import SqliteRepository
 
 SENTENCE_COLUMNS = "s.id, s.spanish_text, s.english_text, s.grammar_note, s.source, s.created_at"
 WORD_COLUMNS = "w.id, w.headword, w.meaning, w.frequency_rank"
@@ -77,13 +75,10 @@ class WordRepository(ABC):
         """Set the rank of each headword, creating words that don't exist yet."""
 
 
-class SqliteSentenceRepository(SentenceRepository):
-    def __init__(self, get_conn: GetConnection) -> None:
-        self._get_conn = get_conn
-
+class SqliteSentenceRepository(SqliteRepository, SentenceRepository):
     def add(self, *, spanish_text: str, english_text: str, grammar_note: str | None,
             source: str, created_at: str) -> Sentence:
-        cursor = self._get_conn().execute(
+        cursor = self._execute(
             "INSERT INTO sentences (spanish_text, english_text, grammar_note, source, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (spanish_text, english_text, grammar_note, source, created_at),
@@ -91,29 +86,23 @@ class SqliteSentenceRepository(SentenceRepository):
         return Sentence(cursor.lastrowid, spanish_text, english_text, grammar_note, source, created_at)
 
     def exists(self, spanish_text: str) -> bool:
-        row = self._get_conn().execute(
-            "SELECT 1 FROM sentences WHERE spanish_text = ?", (spanish_text,)
-        ).fetchone()
-        return row is not None
+        return self._fetch_one("SELECT 1 FROM sentences WHERE spanish_text = ?", (spanish_text,)) is not None
 
     def get(self, sentence_id: int) -> Sentence | None:
-        row = self._get_conn().execute(
-            f"SELECT {SENTENCE_COLUMNS} FROM sentences s WHERE s.id = ?", (sentence_id,)
-        ).fetchone()
+        row = self._fetch_one(f"SELECT {SENTENCE_COLUMNS} FROM sentences s WHERE s.id = ?", (sentence_id,))
         return _to_sentence(row) if row else None
 
     def count(self) -> int:
-        return self._get_conn().execute("SELECT COUNT(*) FROM sentences").fetchone()[0]
+        return self._scalar("SELECT COUNT(*) FROM sentences")
 
     def list_page(self, limit: int, offset: int) -> list[Sentence]:
-        rows = self._get_conn().execute(
-            f"SELECT {SENTENCE_COLUMNS} FROM sentences s ORDER BY s.id LIMIT ? OFFSET ?",
-            (limit, offset),
+        rows = self._fetch_all(
+            f"SELECT {SENTENCE_COLUMNS} FROM sentences s ORDER BY s.id LIMIT ? OFFSET ?", (limit, offset)
         )
         return [_to_sentence(row) for row in rows]
 
     def containing_word(self, word_id: int, limit: int) -> list[Sentence]:
-        rows = self._get_conn().execute(
+        rows = self._fetch_all(
             f"SELECT {SENTENCE_COLUMNS} FROM sentences s "
             "JOIN sentence_words sw ON sw.sentence_id = s.id "
             "WHERE sw.word_id = ? ORDER BY s.id LIMIT ?",
@@ -122,32 +111,22 @@ class SqliteSentenceRepository(SentenceRepository):
         return [_to_sentence(row) for row in rows]
 
 
-class SqliteWordRepository(WordRepository):
-    def __init__(self, get_conn: GetConnection) -> None:
-        self._get_conn = get_conn
-
+class SqliteWordRepository(SqliteRepository, WordRepository):
     def get_or_create(self, headword: str) -> Word:
-        conn = self._get_conn()
-        conn.execute("INSERT OR IGNORE INTO words (headword) VALUES (?)", (headword,))
-        row = conn.execute(
-            f"SELECT {WORD_COLUMNS} FROM words w WHERE w.headword = ?", (headword,)
-        ).fetchone()
-        return _to_word(row)
+        self._execute("INSERT OR IGNORE INTO words (headword) VALUES (?)", (headword,))
+        return _to_word(self._fetch_one(f"SELECT {WORD_COLUMNS} FROM words w WHERE w.headword = ?", (headword,)))
 
     def get(self, word_id: int) -> Word | None:
-        row = self._get_conn().execute(
-            f"SELECT {WORD_COLUMNS} FROM words w WHERE w.id = ?", (word_id,)
-        ).fetchone()
+        row = self._fetch_one(f"SELECT {WORD_COLUMNS} FROM words w WHERE w.id = ?", (word_id,))
         return _to_word(row) if row else None
 
     def link(self, sentence_id: int, word_id: int) -> None:
-        self._get_conn().execute(
-            "INSERT OR IGNORE INTO sentence_words (sentence_id, word_id) VALUES (?, ?)",
-            (sentence_id, word_id),
+        self._execute(
+            "INSERT OR IGNORE INTO sentence_words (sentence_id, word_id) VALUES (?, ?)", (sentence_id, word_id)
         )
 
     def for_sentence(self, sentence_id: int) -> list[Word]:
-        rows = self._get_conn().execute(
+        rows = self._fetch_all(
             f"SELECT {WORD_COLUMNS} FROM words w "
             "JOIN sentence_words sw ON sw.word_id = w.id "
             "WHERE sw.sentence_id = ? ORDER BY w.id",
@@ -156,7 +135,7 @@ class SqliteWordRepository(WordRepository):
         return [_to_word(row) for row in rows]
 
     def list_page(self, limit: int, offset: int) -> list[Word]:
-        rows = self._get_conn().execute(
+        rows = self._fetch_all(
             f"SELECT {WORD_COLUMNS} FROM words w "
             "ORDER BY (w.meaning IS NULL OR w.meaning = '') DESC, "
             "w.frequency_rank IS NULL, w.frequency_rank, w.headword "
@@ -166,12 +145,10 @@ class SqliteWordRepository(WordRepository):
         return [_to_word(row) for row in rows]
 
     def set_meaning(self, word_id: int, meaning: str | None) -> None:
-        self._get_conn().execute(
-            "UPDATE words SET meaning = ? WHERE id = ?", (meaning, word_id)
-        )
+        self._execute("UPDATE words SET meaning = ? WHERE id = ?", (meaning, word_id))
 
     def set_frequency_ranks(self, ranks: dict[str, int]) -> None:
-        self._get_conn().executemany(
+        self._execute_many(
             "INSERT INTO words (headword, frequency_rank) VALUES (?, ?) "
             "ON CONFLICT(headword) DO UPDATE SET frequency_rank = excluded.frequency_rank",
             ranks.items(),

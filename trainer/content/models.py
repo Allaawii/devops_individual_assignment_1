@@ -1,6 +1,9 @@
 """Read-only records for the content domain. Field names match the table columns."""
 
 from dataclasses import dataclass
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -27,3 +30,12 @@ class SentenceDetail:
 
     sentence: Sentence
     words: list[Word]
+
+
+@dataclass(frozen=True)
+class Page(Generic[T]):
+    """One page of a longer list of sentences or words."""
+
+    items: list[T]
+    number: int     # 1-based
+    has_next: bool

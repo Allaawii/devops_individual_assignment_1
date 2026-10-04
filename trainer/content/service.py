@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from datetime import datetime
 
 from trainer.content.grammar_rules import tag_grammar
-from trainer.content.models import Sentence, SentenceDetail, Word
+from trainer.content.models import Page, Sentence, SentenceDetail, T, Word
 from trainer.content.repository import SentenceRepository, WordRepository
 from trainer.content.tokenizer import extract_words
 
@@ -85,9 +85,9 @@ class ContentService:
     def count_sentences(self) -> int:
         return self._sentences.count()
 
-    def list_sentences(self, page: int) -> list[Sentence]:
-        """One page of sentences (PAGE_SIZE per page, pages start at 1)."""
-        return self._sentences.list_page(PAGE_SIZE, _offset(page))
+    def list_sentences(self, page: int) -> Page[Sentence]:
+        """One page of sentences in the order they were added."""
+        return _paginate(self._sentences.list_page, page)
 
     def get_sentence(self, sentence_id: int) -> SentenceDetail | None:
         """The sentence with its words, or None if the id is unknown."""
@@ -103,9 +103,9 @@ class ContentService:
         """Up to `limit` sentences that contain the word, shown on the back of a word card."""
         return self._sentences.containing_word(word_id, limit)
 
-    def list_words(self, page: int) -> list[Word]:
+    def list_words(self, page: int) -> Page[Word]:
         """One page of words: those still missing a meaning first, then by frequency rank."""
-        return self._words.list_page(PAGE_SIZE, _offset(page))
+        return _paginate(self._words.list_page, page)
 
 
 def _blank_to_none(text: str | None) -> str | None:
@@ -115,6 +115,12 @@ def _blank_to_none(text: str | None) -> str | None:
     return text.strip() or None
 
 
-def _offset(page: int) -> int:
-    """Rows to skip for a 1-based page number; pages below 1 count as page 1."""
-    return (max(page, 1) - 1) * PAGE_SIZE
+def _paginate(fetch: Callable[[int, int], list[T]], page: int) -> Page[T]:
+    """Fetch one PAGE_SIZE page (pages below 1 count as page 1).
+
+    `fetch(limit, offset)` is a repository's list_page. One extra row is requested so we
+    know for certain whether a next page exists.
+    """
+    number = max(page, 1)
+    rows = fetch(PAGE_SIZE + 1, (number - 1) * PAGE_SIZE)
+    return Page(rows[:PAGE_SIZE], number, len(rows) > PAGE_SIZE)

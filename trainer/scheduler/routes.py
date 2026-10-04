@@ -11,7 +11,7 @@ from flask import Blueprint, abort, redirect, render_template, request, url_for
 from trainer.content.service import ContentService
 from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD
 from trainer.scheduler.models import SENTENCE_CARD, Card
-from trainer.scheduler.service import MAX_DAILY_GOAL, MIN_DAILY_GOAL, ReviewService
+from trainer.scheduler.service import DAILY_GOAL_ERROR, MAX_DAILY_GOAL, MIN_DAILY_GOAL, ReviewService
 
 # (button label, quality score, what pressing it means)
 RATINGS = [
@@ -44,8 +44,8 @@ def create_blueprint(reviews: ReviewService, content: ContentService) -> Bluepri
         chosen = request.form.get("custom") or request.form.get("goal")
         try:
             reviews.set_daily_goal(int(chosen))
-        except (TypeError, ValueError):
-            return _goal_page(reviews, f"Choose a goal between {MIN_DAILY_GOAL} and {MAX_DAILY_GOAL}."), 400
+        except (TypeError, ValueError):  # missing, not a number, or outside the allowed range
+            return _goal_page(reviews, DAILY_GOAL_ERROR), 400
         return redirect(url_for("review.dashboard"))
 
     @bp.get("/review")
