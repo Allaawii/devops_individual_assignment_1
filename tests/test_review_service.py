@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from tests.fakes import FakeCardRepository, FakeReviewLog
+from tests.fakes import FakeCardRepository, FakeReviewLog, FakeSettingsStore
 from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD, SchedulingStrategy, SM2Strategy
 from trainer.scheduler.models import SENTENCE_CARD, WORD_CARD, CardState
 from trainer.scheduler.service import ReviewService
@@ -37,8 +37,9 @@ def log() -> FakeReviewLog:
     return FakeReviewLog()
 
 
-def _service(cards, log, strategy=None, limit=15) -> ReviewService:
-    return ReviewService(cards, log, strategy or SM2Strategy(), new_cards_per_day=limit)
+def _service(cards, log, strategy=None, limit=15, settings=None) -> ReviewService:
+    return ReviewService(cards, log, settings or FakeSettingsStore(), strategy or SM2Strategy(),
+                         default_new_cards_per_day=limit)
 
 
 @pytest.fixture
@@ -153,6 +154,37 @@ def test_invalid_quality_saves_and_logs_nothing(service, cards, log):
         service.review(1, 9, NOW)
     assert cards.get(1).state == CardState()
     assert log.reviews == []
+
+
+# ----- daily goal -----
+
+def test_default_limit_applies_until_a_goal_is_chosen(service):
+    assert service.daily_goal() is None
+    assert service.new_cards_per_day() == 15
+
+
+def test_chosen_goal_replaces_the_default_and_is_stored(cards, log):
+    settings = FakeSettingsStore()
+    service = _service(cards, log, settings=settings)
+    service.set_daily_goal(20)
+    assert service.daily_goal() == 20
+    assert service.new_cards_per_day() == 20
+    assert settings.values == {"new_cards_per_day": "20"}
+
+
+def test_daily_goal_limits_new_cards(cards, log):
+    service = _service(cards, log, limit=15)
+    service.set_daily_goal(1)
+    service.on_sentence_added(1, [10])
+    service.review(1, GOOD, NOW)
+    assert service.next_card(TODAY) is None
+
+
+@pytest.mark.parametrize("goal", [0, 101, -5])
+def test_goal_outside_1_to_100_is_rejected(service, goal):
+    with pytest.raises(ValueError):
+        service.set_daily_goal(goal)
+    assert service.daily_goal() is None
 
 
 # ----- preview_intervals -----

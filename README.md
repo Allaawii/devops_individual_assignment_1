@@ -1,10 +1,23 @@
 # Contextual Spanish Spaced-Repetition Trainer
 
+A web app for learning Spanish from real sentences, not isolated word lists. Every sentence you add becomes flashcards (one for the sentence and one for each new word), and a spaced-repetition algorithm decides when each card comes back.
+
 IE University · SDD/DevOps Assignment 1.
+
+## Features
+
+- **Daily goal at first start:** you choose how many new cards a day you want (5, 10, 20, 30, or your own number). Change it any time from the dashboard.
+- **Add sentences:** Spanish plus English. A grammar note is added automatically when one of 13 rules matches (for example *Hay que + infinitive*), and the sentence's content words are extracted.
+- **Automatic flashcards:** each new sentence gets a sentence card, plus a word card for every word that doesn't have one yet.
+- **Review:** the card's front is shown first; "Show answer" reveals the translation, grammar note, or example sentences. Rate it **Again**, **Hard**, **Good**, or **Easy**; an info box explains what each button means and when the card will come back.
+- **Scheduling:** SM-2 by default (intervals of 1 day, 6 days, then growing by the card's ease), or a Leitner box system with `SCHEDULER=leitner`. Overdue cards come first; new cards are capped by your daily goal.
+- **Dashboard:** due now, new cards left today, reviewed today, and total sentences, plus a progress bar during review.
+- **Words page:** add your own meaning for any word; it appears on that word's card.
+- **No JavaScript, light and dark mode, keyboard shortcuts** (Alt+S shows the answer, Alt+1 to Alt+4 rate it).
 
 ## Setup and run
 
-Requires Python 3.10+.
+Requires Python 3.10 or newer. Everything runs in one process with one SQLite file; there's no other service to install and no setup step.
 
 ```bash
 python -m venv .venv
@@ -14,13 +27,64 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The app binds to `0.0.0.0` on port `8000` by default.
+Open http://localhost:8000. The app binds to `0.0.0.0`, runs with `debug=False`, and creates `$DATA_DIR/trainer.db` with all tables on first start.
 
-## Environment variables (all optional)
+### Environment variables (all optional)
 
 | Var | Default | Purpose |
 |---|---|---|
 | `PORT` | `8000` | Server port |
-| `DATA_DIR` | `./data` | Where `trainer.db` will live |
-| `SCHEDULER` | `sm2` | Scheduling algorithm |
-| `NEW_CARDS_PER_DAY` | `15` | Daily new-card limit |
+| `DATA_DIR` | `./data` | Folder for `trainer.db` (created if missing) |
+| `SCHEDULER` | `sm2` | `sm2` or `leitner`. An unknown value stops the app at startup with a clear error |
+| `NEW_CARDS_PER_DAY` | `15` | New-card limit used until the learner chooses a daily goal |
+
+Example: `PORT=9000 DATA_DIR=/tmp/trainer SCHEDULER=leitner python app.py`
+
+## Tests and coverage
+
+```bash
+pytest --cov=trainer --cov-report=term-missing
+```
+
+198 tests, **99% coverage** of the `trainer` package. Run one file with `pytest tests/test_algorithms.py`, or one test with `pytest tests/test_algorithms.py::test_name`.
+
+- The scheduling algorithms are pure functions that take `today` as a parameter, so tests fix the date.
+- The services are tested with in-memory fake repositories (`tests/fakes.py`); the SQLite repositories are tested separately against a temporary database.
+- The pages are smoke-tested through Flask's test client. As stated in ADR-4, the route files (`trainer/*/routes.py`) are excluded from the coverage number (`.coveragerc`).
+
+## Architecture
+
+```
+trainer/
+  __init__.py      create_app(): the composition root that wires everything together
+  config.py        environment variables -> Config
+  db.py, schema.sql   one SQLite connection and one transaction per request
+  content/         sentences, words, tokenizer, grammar rules, seed builder (ContentService)
+  scheduler/       cards, reviews, SM-2 and Leitner, daily goal (ReviewService)
+  templates/, static/   Jinja pages and one CSS file
+```
+
+- **Two domains that never import each other.** New sentences reach the scheduler only through an Observer subscription made in `create_app()` (ADR-2). Cards refer to words and sentences by ID only, with no cross-domain foreign keys (ADR-3).
+- **Patterns:** Facade (`ContentService`, `ReviewService`), Observer (content to scheduler), Strategy plus a registry (`SM2Strategy`, `LeitnerStrategy`), Repository with dependency inversion (abstract repositories, SQLite implementations).
+- **Transactions:** repositories never commit. The request teardown commits if the request succeeded and rolls back if it failed, so a sentence and its cards are saved together or not at all.
+
+Design decisions are recorded in [ADR.md](ADR.md); diagrams are in [docs/diagrams.md](docs/diagrams.md); AI assistance is logged in [AI_USAGE.md](AI_USAGE.md).
+
+## Data
+
+Example sentences come from the [Tatoeba Project](https://tatoeba.org), licensed **CC BY 2.0 FR**, through the Spanish-English export at manythings.org/anki. They are real sentences written by people, not generated by AI. The attribution is stored with every sentence, shown on its page, and credited in every page footer.
+
+The seed files are built offline, once, from the manually downloaded export. The app never downloads anything at runtime:
+
+```bash
+python -m trainer.content.seed_build raw/spa-eng.zip --limit 2000
+```
+
+This keeps sentences of 3-12 words without digits, ranks every word by how many sentences use it, and orders sentences by their rarest word, so sentences built from common words are learned first. The result is written to `trainer/content/seed/sentences.tsv` and `words.tsv`.
+
+## Scope and known limitations
+
+- Spanish only, with English as the base language. One learner, no login.
+- Words are not lemmatized, so *hablo* and *hablas* are separate words.
+- Grammar rules are deliberately conservative: a missing note is preferred over a wrong one.
+- No "delete sentence" in v1, because cards refer to content by ID only (ADR-3).

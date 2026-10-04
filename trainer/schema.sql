@@ -52,3 +52,9 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 
 CREATE INDEX IF NOT EXISTS ix_reviews_card ON reviews(card_id);
+
+-- Learner preferences, e.g. the daily goal chosen at first start
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

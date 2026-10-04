@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Daily goal · Spanish trainer{% endblock %}
+{% block content %}
+<div class="card">
+  {% if first_time %}
+  <h1>Welcome</h1>
+  <p>How much do you want to learn each day? This sets how many <strong>new</strong> cards (words and sentences) you get per day.
+     Cards you've already seen keep coming back when they're due, so a smaller goal means shorter sessions later too.</p>
+  {% else %}
+  <h1>Daily goal</h1>
+  <p>You currently get <strong>{{ current }}</strong> new cards a day. Change it any time.</p>
+  {% endif %}
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form method="post" class="stack">
+    <div class="goals">
+      {% for amount, name in presets %}
+      <label class="goal-option">
+        <input type="radio" name="goal" value="{{ amount }}"{% if amount == current %} checked{% endif %}>
+        <span><strong>{{ name }}</strong><br><span class="muted">{{ amount }} new cards a day</span></span>
+      </label>
+      {% endfor %}
+    </div>
+    <label>Or choose your own number ({{ min_goal }}-{{ max_goal }})
+      <input type="number" name="custom" min="{{ min_goal }}" max="{{ max_goal }}" inputmode="numeric">
+    </label>
+    <button type="submit">{{ "Start learning" if first_time else "Save goal" }}</button>
+  </form>
+</div>
+{% endblock %}

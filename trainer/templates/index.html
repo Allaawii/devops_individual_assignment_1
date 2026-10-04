@@ -8,6 +8,8 @@
   <div class="stat"><span class="stat-label">Sentences</span><span class="stat-value">{{ sentence_count }}</span></div>
 </div>
 
+<p class="muted">Daily goal: {{ goal }} new cards a day · <a href="{{ url_for('review.goal') }}">Change</a></p>
+
 {% if stats.due_now or stats.new_left_today %}
 <p><a class="button" href="{{ url_for('review.show_card') }}">Start review</a></p>
 {% elif sentence_count == 0 %}
