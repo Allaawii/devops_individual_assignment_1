@@ -6,7 +6,7 @@ ContentService, so every new sentence gets its cards without content importing t
 
 from datetime import date, datetime
 
-from trainer.scheduler.algorithms import SchedulingStrategy
+from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD, SchedulingStrategy
 from trainer.scheduler.models import Card, CardState, Review, ReviewStats
 from trainer.scheduler.repository import CardRepository, ReviewLog
 
@@ -45,6 +45,11 @@ class ReviewService:
         self._cards.save_state(card_id, new_state)
         self._log.add(Review(card_id, now, quality, new_state.interval_days, new_state.ease_factor))
         return new_state
+
+    def preview_intervals(self, card: Card, today: date) -> dict[int, int]:
+        """Days until the card would come back for each rating. Nothing is saved."""
+        return {quality: self._strategy.next_state(card.state, quality, today).interval_days
+                for quality in (AGAIN, HARD, GOOD, EASY)}
 
     def stats(self, today: date) -> ReviewStats:
         return ReviewStats(

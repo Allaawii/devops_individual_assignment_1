@@ -41,7 +41,24 @@ def test_sentence_card_shows_front_and_answer(client):
     assert "One must study." in page            # inside <details>, hidden until clicked
     assert "Hay que + infinitive" in page
     for label in ["Again", "Hard", "Good", "Easy"]:
-        assert f">{label}</button>" in page
+        assert label in page
+
+
+def test_rating_buttons_show_the_next_interval_and_have_shortcuts(client):
+    _add(client)
+    page = client.get("/review").get_data(as_text=True)
+    assert page.count('class="interval"') == 4
+    assert '<span class="interval">1d</span>' in page  # SM-2: a new card comes back tomorrow
+    for key in "1234":
+        assert f'accesskey="{key}"' in page
+
+
+def test_review_page_shows_todays_progress(client):
+    _add(client)                                  # 3 cards
+    client.post("/review/1", data={"quality": GOOD})
+    page = client.get("/review").get_data(as_text=True)
+    assert '<progress value="1" max="3"' in page
+    assert "1 done · 2 to go" in page
 
 
 def test_rating_a_card_moves_on_to_the_next_one(client):

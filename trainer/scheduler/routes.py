@@ -32,6 +32,7 @@ def create_blueprint(reviews: ReviewService, content: ContentService) -> Bluepri
         if card is None:
             return render_template("review/done.html", stats=reviews.stats(today))
         return render_template("review/card.html", card=card, ratings=RATINGS,
+                               intervals=reviews.preview_intervals(card, today),
                                stats=reviews.stats(today), **_card_content(card, content))
 
     @bp.post("/review/<int:card_id>")

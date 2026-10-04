@@ -9,6 +9,7 @@ from trainer.content.routes import create_blueprint as create_content_blueprint
 from trainer.content.service import ContentService
 from trainer.scheduler.algorithms import get_strategy
 from trainer.scheduler.repository import SqliteCardRepository, SqliteReviewLog
+from trainer.scheduler.routes import create_blueprint as create_review_blueprint
 from trainer.scheduler.service import ReviewService
 
 
@@ -27,6 +28,7 @@ def create_app(config: Config | None = None) -> Flask:
     app.extensions["content_service"] = content_service
     app.extensions["review_service"] = review_service
     app.register_blueprint(create_content_blueprint(content_service))
+    app.register_blueprint(create_review_blueprint(review_service, content_service))
 
     @app.get("/health")
     def health():
