@@ -4,11 +4,9 @@ import sqlite3
 
 import pytest
 
-from trainer import create_app
-from trainer.config import Config
 from trainer.db import connect, get_db, init_db
 
-TABLES = {"sentences", "words", "sentence_words", "cards", "reviews"}
+TABLES = {"sentences", "words", "sentence_words", "cards", "reviews", "settings"}
 INSERT_SENTENCE = (
     "INSERT INTO sentences (spanish_text, english_text, source, created_at) "
     "VALUES ('Hola', 'Hello', 'user', '2026-09-27T10:00:00')"
@@ -77,12 +75,7 @@ def test_review_quality_outside_0_to_5_is_rejected(conn):
         )
 
 
-# ----- app wiring and transactions -----
-
-@pytest.fixture
-def app(tmp_path):
-    return create_app(Config(data_dir=str(tmp_path / "nested" / "data")))
-
+# ----- app wiring and transactions (the `app` fixture is in conftest.py) -----
 
 def test_create_app_creates_database_under_data_dir(app, tmp_path):
     assert (tmp_path / "nested" / "data" / "trainer.db").exists()

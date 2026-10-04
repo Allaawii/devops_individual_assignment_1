@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Config:
-    """App settings, read once from environment variables at startup."""
+    """App settings, read once from environment variables at startup. The defaults are written once, here."""
 
     port: int = 8000
     data_dir: str = "./data"
@@ -15,10 +15,10 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        """Build a Config from environment variables, falling back to defaults."""
+        """Build a Config from environment variables; anything unset keeps the default above."""
         return cls(
-            port=int(os.environ.get("PORT", 8000)),
-            data_dir=os.environ.get("DATA_DIR", "./data"),
-            scheduler=os.environ.get("SCHEDULER", "sm2"),
-            new_cards_per_day=int(os.environ.get("NEW_CARDS_PER_DAY", 15)),
+            port=int(os.environ.get("PORT", cls.port)),
+            data_dir=os.environ.get("DATA_DIR", cls.data_dir),
+            scheduler=os.environ.get("SCHEDULER", cls.scheduler),
+            new_cards_per_day=int(os.environ.get("NEW_CARDS_PER_DAY", cls.new_cards_per_day)),
         )

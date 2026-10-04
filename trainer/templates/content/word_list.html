@@ -4,17 +4,17 @@
 {% block content %}
 <h1>Words</h1>
 <p class="muted">Words still missing a meaning come first, most common first.</p>
-{% if words %}
+{% if page.items %}
 <table>
   <thead><tr><th>Word</th><th class="hide-small">Rank</th><th>Meaning</th></tr></thead>
   <tbody>
-    {% for word in words %}
+    {% for word in page.items %}
     <tr>
       <td lang="es">{{ word.headword }}</td>
       <td class="hide-small muted">{{ word.frequency_rank or "–" }}</td>
       <td>
         <form method="post" action="{{ url_for('content.save_meaning', word_id=word.id) }}" class="inline">
-          <input type="hidden" name="page" value="{{ page }}">
+          <input type="hidden" name="page" value="{{ page.number }}">
           <input name="meaning" value="{{ word.meaning or '' }}" aria-label="Meaning of {{ word.headword }}">
           <button type="submit" class="secondary">Save</button>
         </form>
@@ -23,7 +23,7 @@
     {% endfor %}
   </tbody>
 </table>
-{{ pager('content.list_words', page, has_next) }}
+{{ pager('content.list_words', page) }}
 {% else %}
 <p>Words appear here once you <a href="{{ url_for('content.new_sentence') }}">add a sentence</a>.</p>
 {% endif %}

@@ -96,12 +96,14 @@ def read_lines(zip_path: Path) -> list[str]:
 def write_seed(out_dir: Path, chosen: list[Candidate], ranks: dict[str, int]) -> None:
     """Write sentences.tsv (spanish, english, attribution) and words.tsv (headword, rank)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / "sentences.tsv", "w", encoding="utf-8", newline="") as file:
-        writer = csv.writer(file, delimiter="\t", lineterminator="\n")
-        writer.writerows((c.spanish, c.english, c.attribution) for c in chosen)
-    with open(out_dir / "words.tsv", "w", encoding="utf-8", newline="") as file:
-        writer = csv.writer(file, delimiter="\t", lineterminator="\n")
-        writer.writerows(sorted(ranks.items(), key=lambda item: item[1]))
+    _write_tsv(out_dir / "sentences.tsv", ((c.spanish, c.english, c.attribution) for c in chosen))
+    _write_tsv(out_dir / "words.tsv", sorted(ranks.items(), key=lambda item: item[1]))
+
+
+def _write_tsv(path: Path, rows: Iterable[tuple]) -> None:
+    """Write tab-separated rows; the csv module quotes any text that needs it."""
+    with open(path, "w", encoding="utf-8", newline="") as file:
+        csv.writer(file, delimiter="\t", lineterminator="\n").writerows(rows)
 
 
 def main(argv: list[str] | None = None) -> None:  # pragma: no cover

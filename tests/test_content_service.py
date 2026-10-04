@@ -149,7 +149,9 @@ def test_example_sentences_are_limited_to_three(service, word_repo):
 
 def test_list_words_returns_a_page(service):
     service.add_sentence("El gato come.", "The cat eats.")
-    assert [w.headword for w in service.list_words(page=1)] == ["gato", "come"]
+    page = service.list_words(page=1)
+    assert [w.headword for w in page.items] == ["gato", "come"]
+    assert not page.has_next
 
 
 # ----- reading -----
@@ -158,10 +160,24 @@ def test_get_unknown_sentence_returns_none(service):
     assert service.get_sentence(999) is None
 
 
-def test_sentences_are_paged(service):
-    for i in range(PAGE_SIZE + 1):
+def _add_many(service: ContentService, count: int) -> None:
+    for i in range(count):
         service.add_sentence(f"Frase {i}", f"Sentence {i}")
+
+
+def test_sentences_are_paged(service):
+    _add_many(service, PAGE_SIZE + 1)
+    first, second = service.list_sentences(page=1), service.list_sentences(page=2)
     assert service.count_sentences() == PAGE_SIZE + 1
-    assert len(service.list_sentences(page=1)) == PAGE_SIZE
-    assert len(service.list_sentences(page=2)) == 1
+    assert (len(first.items), first.number, first.has_next) == (PAGE_SIZE, 1, True)
+    assert (len(second.items), second.number, second.has_next) == (1, 2, False)
+
+
+def test_exactly_one_full_page_has_no_next_page(service):
+    _add_many(service, PAGE_SIZE)
+    assert not service.list_sentences(page=1).has_next
+
+
+def test_page_below_1_counts_as_page_1(service):
+    _add_many(service, 2)
     assert service.list_sentences(page=0) == service.list_sentences(page=1)

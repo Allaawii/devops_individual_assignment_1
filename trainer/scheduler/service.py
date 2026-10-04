@@ -6,13 +6,14 @@ ContentService, so every new sentence gets its cards without content importing t
 
 from datetime import date, datetime
 
-from trainer.scheduler.algorithms import AGAIN, EASY, GOOD, HARD, SchedulingStrategy
+from trainer.scheduler.algorithms import RATING_QUALITIES, SchedulingStrategy
 from trainer.scheduler.models import Card, CardState, Review, ReviewStats
 from trainer.scheduler.repository import CardRepository, ReviewLog, SettingsStore
 
 DAILY_GOAL_KEY = "new_cards_per_day"
 MIN_DAILY_GOAL = 1
 MAX_DAILY_GOAL = 100
+DAILY_GOAL_ERROR = f"Choose a goal between {MIN_DAILY_GOAL} and {MAX_DAILY_GOAL} new cards a day."
 
 
 class ReviewService:
@@ -34,7 +35,7 @@ class ReviewService:
     def set_daily_goal(self, new_cards_per_day: int) -> None:
         """Save the learner's goal. Raises ValueError outside 1-100."""
         if not MIN_DAILY_GOAL <= new_cards_per_day <= MAX_DAILY_GOAL:
-            raise ValueError(f"Choose between {MIN_DAILY_GOAL} and {MAX_DAILY_GOAL} new cards a day.")
+            raise ValueError(DAILY_GOAL_ERROR)
         self._settings.set(DAILY_GOAL_KEY, str(new_cards_per_day))
 
     def new_cards_per_day(self) -> int:
@@ -76,7 +77,7 @@ class ReviewService:
     def preview_intervals(self, card: Card, today: date) -> dict[int, int]:
         """Days until the card would come back for each rating. Nothing is saved."""
         return {quality: self._strategy.next_state(card.state, quality, today).interval_days
-                for quality in (AGAIN, HARD, GOOD, EASY)}
+                for quality in RATING_QUALITIES}
 
     def stats(self, today: date) -> ReviewStats:
         return ReviewStats(

@@ -1,12 +1,44 @@
 """SQLite connection handling: one connection and one transaction per request."""
 
 import sqlite3
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
+from typing import Any
 
 from flask import Flask, current_app, g
 
 DB_FILENAME = "trainer.db"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+
+GetConnection = Callable[[], sqlite3.Connection]
+
+
+class SqliteRepository:
+    """Base class for every SQLite repository: the connection getter plus small query helpers.
+
+    It takes a function instead of a connection, so a repository can be built once in
+    create_app() and still use the current request's connection. Repositories never commit;
+    close_db() does that at the end of the request.
+    """
+
+    def __init__(self, get_conn: GetConnection) -> None:
+        self._get_conn = get_conn
+
+    def _execute(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
+        return self._get_conn().execute(sql, params)
+
+    def _execute_many(self, sql: str, rows: Iterable[Sequence[Any]]) -> None:
+        self._get_conn().executemany(sql, rows)
+
+    def _fetch_one(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Row | None:
+        return self._execute(sql, params).fetchone()
+
+    def _fetch_all(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        return self._execute(sql, params).fetchall()
+
+    def _scalar(self, sql: str, params: Sequence[Any] = ()) -> Any:
+        """The first value of the first row, e.g. the result of COUNT(*)."""
+        return self._fetch_one(sql, params)[0]
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:

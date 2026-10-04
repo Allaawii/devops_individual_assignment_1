@@ -3,11 +3,11 @@
 {% block title %}Sentences · Spanish trainer{% endblock %}
 {% block content %}
 <h1>Sentences <span class="muted">({{ total }})</span></h1>
-{% if sentences %}
+{% if page.items %}
 <table>
   <thead><tr><th>Spanish</th><th class="hide-small">English</th></tr></thead>
   <tbody>
-    {% for sentence in sentences %}
+    {% for sentence in page.items %}
     <tr>
       <td lang="es"><a href="{{ url_for('content.sentence_detail', sentence_id=sentence.id) }}">{{ sentence.spanish_text }}</a></td>
       <td class="hide-small">{{ sentence.english_text }}</td>
@@ -15,7 +15,7 @@
     {% endfor %}
   </tbody>
 </table>
-{{ pager('content.list_sentences', page, has_next) }}
+{{ pager('content.list_sentences', page) }}
 {% else %}
 <p>Start your collection. <a href="{{ url_for('content.new_sentence') }}">Add a sentence</a></p>
 {% endif %}
