@@ -7,5 +7,6 @@ htmlcov/
 
 # Local-only planning/instructions files, not for the remote repo
 PROJECT_PLAN.md
+ASSIGNMENT2_DESIGN.md
 CLAUDE.md
 .claude/

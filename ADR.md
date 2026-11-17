@@ -38,3 +38,11 @@ Context: The target learners plateaued on gamified apps; the goal is long-term r
 Decision: No streaks, hearts, points or leaderboards. The dashboard only shows cards due, new cards left today, and reviews done today.
 Alternatives considered: Streaks and leaderboards (rejected: they reward opening the app rather than remembering, and punish missed days). Also considered and deferred: user login, multiple languages, a stats dashboard.
 Consequences: A simpler app focused on reviewing. The cost is less outside motivation for learners who enjoy game elements.
+
+## 6. Two services over HTTP, with the scheduler pulling new sentences
+Date: 2026-11-15
+Status: Decided
+Context: Assignment 2 splits the monolith at the seam from ADR-2. Content owns sentences and words, the scheduler owns cards and reviews, and each must deploy, scale to zero and fail on its own. The in-process Observer cannot cross a process boundary, and no message broker is allowed.
+Decision: Two Flask services, each with its own database and no shared code (migrate.py and the database helpers are copied on purpose). The scheduler calls content's JSON API over HTTP, always with a timeout. New cards are pulled: when the scheduler runs out of new cards it calls GET /sentences/feed?after_id=<highest sentence id it has a card for>. Review text and placement scoring go through the scheduler on the server; the dashboard calls both services from the browser. When content is down, review and placement return a designed 503 JSON error and everything the scheduler owns keeps working.
+Alternatives considered: Push, where content calls the scheduler for every new sentence (rejected: content would depend on the scheduler being up, and one failed call loses that card for good). One shared database (rejected: it undoes the split). A shared Python package (rejected: every change would mean redeploying both services).
+Consequences: Content does not know the scheduler exists, and a failed pull is simply tried again on the next review. The costs: a new sentence becomes a card only when the scheduler next runs out of new cards (the same order learners saw in Assignment 1); "new left today" can only show the daily allowance; and the two copies of the migration runner must be kept in step by hand.
