@@ -1,7 +1,7 @@
 # Architecture Decision Records
 ## 1. Flask with stdlib sqlite3
 Date: 2026-09-28
-Status: Decided
+Status: Superseded by 7 (SQLite replaced by SQL Server; Flask and hand-written SQL stay)
 Context: A small single-user web app with 5 tables.
 Decision: Use Flask with Jinja templates, and Python's built-in sqlite3 with hand-written SQL kept in the repository files.
 Alternatives considered: FastAPI (async and API features go unused, needs extra packages); Django and SQLAlchemy (too much abstraction for 5 tables, and they hide the SQL).
@@ -46,3 +46,11 @@ Context: Assignment 2 splits the monolith at the seam from ADR-2. Content owns s
 Decision: Two Flask services, each with its own database and no shared code (migrate.py and the database helpers are copied on purpose). The scheduler calls content's JSON API over HTTP, always with a timeout. New cards are pulled: when the scheduler runs out of new cards it calls GET /sentences/feed?after_id=<highest sentence id it has a card for>. Review text and placement scoring go through the scheduler on the server; the dashboard calls both services from the browser. When content is down, review and placement return a designed 503 JSON error and everything the scheduler owns keeps working.
 Alternatives considered: Push, where content calls the scheduler for every new sentence (rejected: content would depend on the scheduler being up, and one failed call loses that card for good). One shared database (rejected: it undoes the split). A shared Python package (rejected: every change would mean redeploying both services).
 Consequences: Content does not know the scheduler exists, and a failed pull is simply tried again on the next review. The costs: a new sentence becomes a card only when the scheduler next runs out of new cards (the same order learners saw in Assignment 1); "new left today" can only show the daily allowance; and the two copies of the migration runner must be kept in step by hand.
+
+## 7. SQL Server per service, with versioned migrations run at startup
+Date: 2026-11-17
+Status: Decided
+Context: Each service needs its own database that survives restarts and redeploys, both in a local container and on Azure SQL serverless. The schema must be able to change later without manual steps, and a SQLite file (ADR-1) cannot be shared by containers that scale to zero.
+Decision: SQL Server through pymssql with hand-written SQL (no ORM), one database and one login per service, each login db_owner of its own database only. Schema changes are numbered SQL files applied by a small runner (migrate.py) at every startup, forward only: applied versions are recorded in schema_migrations, and each file runs in one transaction with its version row. Startup retries the connection for about 90 s, because a paused serverless database takes time to resume. Local Docker Compose uses clearly labelled local-only passwords that can be overridden from an ignored .env; Azure passwords live only in GitHub secrets.
+Alternatives considered: Alembic (rejected: brings SQLAlchemy and hides the SQL that ADR-1 kept visible). CREATE TABLE IF NOT EXISTS at startup as in Assignment 1 (rejected: cannot change an existing table or show what ran). A manual migration step before deploying (rejected: easy to forget, and the app must start with no manual steps).
+Consequences: A new database and an existing one reach the same schema the same way, and the log says which migrations ran. The costs: a migration cannot be undone, so a mistake is fixed with a new file; the scheduler's "new left today" now shows what is left of the daily goal, because sentences not pulled yet are not in its database; and resetting one database without the other breaks the card-to-sentence mapping, since no foreign key can cross databases.

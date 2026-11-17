@@ -1,0 +1,6 @@
+line-length = 120
+target-version = "py310"
+
+[lint]
+# pyflakes, pycodestyle, import order and bugbear: pinned so a newer ruff does not change the rules
+select = ["E", "F", "W", "I", "B"]
