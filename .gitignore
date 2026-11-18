@@ -10,3 +10,6 @@ PROJECT_PLAN.md
 ASSIGNMENT2_DESIGN.md
 CLAUDE.md
 .claude/
+
+# Local overrides for docker compose (passwords); never committed
+.env
