@@ -1,0 +1,16 @@
+# Kept out of the image: tests, dev tools, caches and anything that could hold a secret.
+tests/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+.env
+requirements-dev.txt
+pytest.ini
+ruff.toml
+.coveragerc
+Dockerfile
+.dockerignore

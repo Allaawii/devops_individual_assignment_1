@@ -1,0 +1,93 @@
+# The whole system on one machine: SQL Server, a one-off job that creates the two databases
+# and logins, both services, and the static UI.
+#
+#   docker compose up --build        then open http://localhost:8080
+#   docker compose down -v           stop and delete the local databases
+#
+# The passwords below are LOCAL-ONLY DEFAULTS for a database that never leaves this machine
+# (SQL Server's port is not published). Override them in a .env file next to this one
+# (ignored by Git). Azure passwords are never here: they live only in GitHub secrets.
+
+name: frase
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-LocalDevOnly_Sa1}
+    volumes:
+      - sqlserver-data:/var/opt/mssql          # the data survives `docker compose down` (not `down -v`)
+    healthcheck:                               # healthy once it answers a query
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -b -Q \"SELECT 1\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    # No "ports": only the containers on this network can reach the database.
+
+  db-init:                                     # runs db/init.sql once per start, then exits
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-LocalDevOnly_Sa1}
+      CONTENT_DB_PASSWORD: ${CONTENT_DB_PASSWORD:-LocalDevOnly_Content1}
+      SCHEDULER_DB_PASSWORD: ${SCHEDULER_DB_PASSWORD:-LocalDevOnly_Scheduler1}
+    volumes:
+      - ./db:/db:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >-
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -C -b -i /db/init.sql
+        -v CONTENT_PASSWORD="$$CONTENT_DB_PASSWORD" SCHEDULER_PASSWORD="$$SCHEDULER_DB_PASSWORD"
+    restart: "no"
+
+  content:
+    build:
+      context: services/content
+      args:
+        GIT_SHA: ${GIT_SHA:-local}
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: mssql://content_svc:${CONTENT_DB_PASSWORD:-LocalDevOnly_Content1}@sqlserver:1433/content
+      CORS_ORIGIN: http://localhost:8080
+    ports:
+      - "8001:8000"
+    healthcheck: &health                       # the same check for both services
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  scheduler:
+    build:
+      context: services/scheduler
+      args:
+        GIT_SHA: ${GIT_SHA:-local}
+    depends_on:                                # deliberately NOT on content: the scheduler must
+      db-init:                                 # start and answer even when content is down
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: mssql://scheduler_svc:${SCHEDULER_DB_PASSWORD:-LocalDevOnly_Scheduler1}@sqlserver:1433/scheduler
+      CORS_ORIGIN: http://localhost:8080
+      CONTENT_URL: http://content:8000         # the service name works as a host name inside compose
+    ports:
+      - "8002:8000"
+    healthcheck: *health
+
+  ui:                                          # the static pages; config.js points at 8001 and 8002
+    image: nginx:alpine
+    volumes:
+      - ./ui:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+
+volumes:
+  sqlserver-data:
