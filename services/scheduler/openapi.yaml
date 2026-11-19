@@ -1,0 +1,289 @@
+openapi: 3.0.3
+info:
+  title: Frase scheduler service
+  version: "1.0.0"
+  description: >-
+    Cards, reviews, the daily goal and the placement level. Sentences and words belong to the
+    content service: the scheduler pulls new sentences from it (GET /sentences/feed), fetches a
+    card's text (GET /sentences/{id}, GET /words/{id}) and has quiz answers scored
+    (POST /placement/score), each call with a timeout and tried once. When content does not
+    answer, the routes that need it return the designed 503 content_unavailable; everything else
+    keeps working. Every error body has the shape {"error": "<code>", "message": "<text>"};
+    unknown paths answer 404 and wrong methods 405 in the same shape. CORS allows only the
+    UI's origin (CORS_ORIGIN), and every path answers an OPTIONS preflight with 204.
+servers:
+  - url: http://localhost:8002
+    description: Local docker compose
+
+paths:
+  /health:
+    get:
+      summary: Whether this service can read and write its own database (never asks content)
+      operationId: health
+      responses:
+        "200":
+          description: The database answered a read and a write.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: The database could not be read or written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /stats:
+    get:
+      summary: Today's numbers, from the scheduler's own tables only (works while content is down)
+      operationId: stats
+      responses:
+        "200":
+          description: The dashboard numbers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stats" }
+
+  /goal:
+    get:
+      summary: The daily goal (new cards a day)
+      operationId: getGoal
+      responses:
+        "200":
+          description: The chosen goal (null before the learner picks one) and its limits.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Goal" }
+    put:
+      summary: Set the daily goal
+      operationId: setGoal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goal]
+              properties:
+                goal: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: The saved goal.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [goal]
+                properties:
+                  goal: { type: integer }
+        "400":
+          description: "invalid_goal: not a whole number from 1 to 100."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /review/next:
+    get:
+      summary: The next card to review, with its text from the content service
+      operationId: nextReview
+      description: >-
+        Due cards come first, then a new card while today's goal allows. When no new card is
+        stored, the next sentences are pulled from content first.
+      responses:
+        "200":
+          description: The next card, or card null when nothing is left for today.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NextReview" }
+        "503":
+          description: "content_unavailable: content did not answer in time; the learner's progress is safe."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /review/{card_id}:
+    post:
+      summary: Rate a card; the scheduling algorithm (SM-2 or Leitner) picks its next due date
+      operationId: rateCard
+      parameters:
+        - name: card_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quality]
+              properties:
+                quality: { type: integer, minimum: 0, maximum: 5, description: "Buttons send 0 (Again), 3 (Hard), 4 (Good), 5 (Easy)." }
+      responses:
+        "200":
+          description: The card's new schedule.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [card_id, interval_days, due_date]
+                properties:
+                  card_id: { type: integer }
+                  interval_days: { type: integer }
+                  due_date: { type: string, format: date }
+        "400":
+          description: "invalid_quality: not a whole number from 0 to 5."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: "not_found: no card has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /placement:
+    post:
+      summary: Place the learner from quiz answers (scored by content), or skip the quiz
+      operationId: placeLearner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [answers]
+                  properties:
+                    answers:
+                      type: object
+                      additionalProperties: { type: string }
+                      description: Question field -> chosen option, as in content's POST /placement/score.
+                - type: object
+                  required: [skip]
+                  properties:
+                    skip: { type: boolean, enum: [true], description: Start at the first level; needs no content call. }
+      responses:
+        "200":
+          description: The level; the cards below it are marked as known and come back once months later.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [level, level_name, skipped]
+                properties:
+                  level: { type: integer, minimum: 0, maximum: 4 }
+                  level_name: { type: string }
+                  skipped: { type: integer, description: Cards marked as already known. }
+        "400":
+          description: "invalid_answers: neither an answers object of text values nor skip: true."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: "content_unavailable: content could not score the answers; nothing was saved."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, example: content_unavailable }
+        message: { type: string }
+
+    Health:
+      type: object
+      required: [status, db, version]
+      properties:
+        status: { type: string, enum: [ok, error] }
+        db: { type: string, enum: [ok, error] }
+        version: { type: string, description: Git commit SHA the image was built from (GIT_SHA). }
+
+    Stats:
+      type: object
+      required: [due_now, new_left_today, reviewed_today, total_cards, goal, level, level_name]
+      properties:
+        due_now: { type: integer }
+        new_left_today: { type: integer, description: What is left of today's goal (sentences not pulled yet are not counted). }
+        reviewed_today: { type: integer }
+        total_cards: { type: integer }
+        goal: { type: integer, nullable: true }
+        level: { type: integer, nullable: true }
+        level_name: { type: string, nullable: true }
+
+    Goal:
+      type: object
+      required: [goal, default, min, max]
+      properties:
+        goal: { type: integer, nullable: true }
+        default: { type: integer, description: "NEW_CARDS_PER_DAY, used until a goal is chosen." }
+        min: { type: integer, example: 1 }
+        max: { type: integer, example: 100 }
+
+    Progress:
+      type: object
+      required: [done, remaining]
+      properties:
+        done: { type: integer, description: Reviews made today. }
+        remaining: { type: integer, description: Cards due now plus what is left of today's goal. }
+
+    NextReview:
+      type: object
+      required: [card, progress]
+      properties:
+        card:
+          type: object
+          nullable: true
+          required: [id, card_type]
+          properties:
+            id: { type: integer }
+            card_type: { type: string, enum: [sentence, word] }
+        content:
+          description: The content service's body for the card, passed through unchanged.
+          oneOf:
+            - $ref: "#/components/schemas/SentenceDetail"
+            - $ref: "#/components/schemas/WordDetail"
+        intervals:
+          type: object
+          description: Quality ("0", "3", "4", "5") -> days until the card would come back.
+          additionalProperties: { type: integer }
+        progress: { $ref: "#/components/schemas/Progress" }
+
+    # The shapes below are the content service's (services/content/openapi.yaml), copied unchanged.
+    Sentence:
+      type: object
+      required: [id, spanish_text, english_text, grammar_note, source, created_at]
+      properties:
+        id: { type: integer }
+        spanish_text: { type: string }
+        english_text: { type: string }
+        grammar_note: { type: string, nullable: true }
+        source: { type: string }
+        created_at: { type: string }
+
+    Word:
+      type: object
+      required: [id, headword, meaning, frequency_rank]
+      properties:
+        id: { type: integer }
+        headword: { type: string }
+        meaning: { type: string, nullable: true }
+        frequency_rank: { type: integer, nullable: true }
+
+    SentenceDetail:
+      type: object
+      required: [sentence, words, key_words]
+      properties:
+        sentence: { $ref: "#/components/schemas/Sentence" }
+        words: { type: array, items: { $ref: "#/components/schemas/Word" } }
+        key_words: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/Word" } }
+
+    WordDetail:
+      type: object
+      required: [word, examples]
+      properties:
+        word: { $ref: "#/components/schemas/Word" }
+        examples: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/Sentence" } }

@@ -1,0 +1,336 @@
+openapi: 3.0.3
+info:
+  title: Frase content service
+  version: "1.0.0"
+  description: >-
+    Sentences, words, the placement quiz and the feed the scheduler pulls new sentences from.
+    Every error body has the shape {"error": "<code>", "message": "<text>"}; an unknown path
+    answers 404 and a wrong method 405 in the same shape. CORS allows only the UI's origin
+    (CORS_ORIGIN), and every path answers an OPTIONS preflight with 204.
+servers:
+  - url: http://localhost:8001
+    description: Local docker compose
+
+paths:
+  /health:
+    get:
+      summary: Whether this service can read and write its own database
+      operationId: health
+      responses:
+        "200":
+          description: The database answered a read and a write.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: The database could not be read or written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /sentences:
+    get:
+      summary: One page of sentences, in the order they were added (the seed is easiest first)
+      operationId: listSentences
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: Up to 50 sentences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SentencePage" }
+    post:
+      summary: Add a sentence; its words are extracted and linked
+      operationId: addSentence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewSentence" }
+      responses:
+        "201":
+          description: The stored sentence. A grammar note is added automatically when a rule matches.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Sentence" }
+        "400":
+          description: "invalid_sentence: a text is missing, too long, or the Spanish text already exists."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /sentences/feed:
+    get:
+      summary: The pull, called by the scheduler for sentences it has no cards for yet
+      operationId: sentenceFeed
+      parameters:
+        - name: after_id
+          in: query
+          description: Only sentences with a higher id (the highest sentence id the caller already knows).
+          schema: { type: integer, default: 0 }
+        - name: limit
+          in: query
+          description: Most sentences to return; values outside 1-100 are moved into that range.
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: The next sentences in ascending id order; an empty list when there are none.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Feed" }
+
+  /sentences/{sentence_id}:
+    get:
+      summary: A sentence with its words and its key words (the 3 rarest)
+      operationId: getSentence
+      parameters:
+        - name: sentence_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The sentence. The scheduler shows this body on a sentence card.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SentenceDetail" }
+        "404":
+          description: "not_found: no sentence has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /words:
+    get:
+      summary: One page of words, those without a meaning first, then by frequency rank
+      operationId: listWords
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: Up to 50 words.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WordPage" }
+
+  /words/{word_id}:
+    get:
+      summary: A word with up to 3 example sentences
+      operationId: getWord
+      parameters:
+        - $ref: "#/components/parameters/WordId"
+      responses:
+        "200":
+          description: The word. The scheduler shows this body on a word card.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WordDetail" }
+        "404":
+          description: "not_found: no word has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /words/{word_id}/meaning:
+    put:
+      summary: Save the learner's meaning for a word (null or blank clears it)
+      operationId: setMeaning
+      parameters:
+        - $ref: "#/components/parameters/WordId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meaning]
+              properties:
+                meaning: { type: string, nullable: true, maxLength: 500 }
+      responses:
+        "200":
+          description: The word with its new meaning.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Word" }
+        "400":
+          description: "invalid_meaning: the meaning is not text or is longer than 500 characters."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: "not_found: no word has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /placement/quiz:
+    get:
+      summary: The placement quiz (the right answers are never sent)
+      operationId: placementQuiz
+      responses:
+        "200":
+          description: Two questions from each of the four easiest levels; empty when the seed is too small.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Quiz" }
+
+  /placement/score:
+    post:
+      summary: Score quiz answers, called by the scheduler
+      operationId: scorePlacement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Answers" }
+      responses:
+        "200":
+          description: The level and the seed sentences and words below it, which the learner can skip.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlacementResult" }
+        "400":
+          description: "invalid_answers: answers is not an object of text values."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: 1-based page number; a missing, non-numeric or lower value means page 1.
+      schema: { type: integer, default: 1, minimum: 1 }
+    WordId:
+      name: word_id
+      in: path
+      required: true
+      schema: { type: integer }
+
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, example: invalid_sentence }
+        message: { type: string }
+
+    Health:
+      type: object
+      required: [status, db, version]
+      properties:
+        status: { type: string, enum: [ok, error] }
+        db: { type: string, enum: [ok, error] }
+        version: { type: string, description: Git commit SHA the image was built from (GIT_SHA). }
+
+    Sentence:
+      type: object
+      required: [id, spanish_text, english_text, grammar_note, source, created_at]
+      properties:
+        id: { type: integer }
+        spanish_text: { type: string }
+        english_text: { type: string }
+        grammar_note: { type: string, nullable: true }
+        source: { type: string, description: '"user", or the Tatoeba attribution of a seed sentence.' }
+        created_at: { type: string, example: "2026-11-19T10:30:00", description: "ISO-8601 time, without a time zone." }
+
+    NewSentence:
+      type: object
+      required: [spanish, english]
+      properties:
+        spanish: { type: string, maxLength: 500 }
+        english: { type: string, maxLength: 500 }
+        grammar_note: { type: string, nullable: true, maxLength: 1000 }
+
+    SentencePage:
+      type: object
+      required: [items, page, has_next, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Sentence" } }
+        page: { type: integer }
+        has_next: { type: boolean }
+        total: { type: integer, description: Number of sentences in all pages. }
+
+    Word:
+      type: object
+      required: [id, headword, meaning, frequency_rank]
+      properties:
+        id: { type: integer }
+        headword: { type: string }
+        meaning: { type: string, nullable: true }
+        frequency_rank: { type: integer, nullable: true, description: 1 is the most common; null for words only in learner sentences. }
+
+    WordPage:
+      type: object
+      required: [items, page, has_next]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Word" } }
+        page: { type: integer }
+        has_next: { type: boolean }
+
+    SentenceDetail:
+      type: object
+      required: [sentence, words, key_words]
+      properties:
+        sentence: { $ref: "#/components/schemas/Sentence" }
+        words: { type: array, items: { $ref: "#/components/schemas/Word" } }
+        key_words: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/Word" } }
+
+    WordDetail:
+      type: object
+      required: [word, examples]
+      properties:
+        word: { $ref: "#/components/schemas/Word" }
+        examples: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/Sentence" } }
+
+    Feed:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, word_ids]
+            properties:
+              id: { type: integer, description: Sentence id. }
+              word_ids: { type: array, items: { type: integer }, description: "Ids of the sentence's words, ascending." }
+
+    Quiz:
+      type: object
+      required: [questions, levels]
+      properties:
+        questions:
+          type: array
+          items:
+            type: object
+            required: [field, spanish, options, level]
+            properties:
+              field: { type: string, example: q123, description: Key to use for this question in the answers. }
+              spanish: { type: string }
+              options: { type: array, minItems: 4, maxItems: 4, items: { type: string } }
+              level: { type: integer, minimum: 0, maximum: 3 }
+        levels:
+          type: array
+          items: { type: string }
+          example: [Starter, Beginner, Elementary, Intermediate, Advanced]
+
+    Answers:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: object
+          additionalProperties: { type: string }
+          description: Question field -> chosen option text, or "dont-know".
+
+    PlacementResult:
+      type: object
+      required: [level, level_name, sentence_ids, word_ids]
+      properties:
+        level: { type: integer, minimum: 0, maximum: 4 }
+        level_name: { type: string }
+        sentence_ids: { type: array, items: { type: integer } }
+        word_ids: { type: array, items: { type: integer } }
