@@ -1,0 +1,173 @@
+# One pipeline for the whole repository (ADR-9).
+# CI, on every push and pull request: lint and test each service against a real SQL Server,
+# with a 70% coverage gate; validate system.yaml and both OpenAPI documents; build every image
+# and run the cross-seam tests against the compose stack, including content being stopped.
+# CD jobs (push to main only, after all CI jobs pass) are added below the CI jobs.
+#
+# No secret is stored here. CI never touches Azure SQL: every database password used in CI
+# is generated inside the run, masked in the logs, and thrown away with the run.
+
+name: pipeline
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older run, except on main, where a deploy
+# must never be cut off halfway.
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # a failure in one service still shows the other's results
+      matrix:
+        service: [content, scheduler]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: services/${{ matrix.service }}/requirements*.txt
+
+      - name: Install the service and its test tools
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Start a throwaway SQL Server with a password made for this run
+        run: |
+          password="Ci_$(openssl rand -hex 16)"
+          echo "::add-mask::$password"
+          echo "SA_PASSWORD=$password" >> "$GITHUB_ENV"
+          docker run -d --name sqlserver -p 1433:1433 \
+            -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$password" \
+            mcr.microsoft.com/mssql/server:2022-latest
+
+      - name: Wait for SQL Server, then create the test database
+        run: |
+          for attempt in $(seq 1 60); do
+            if docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$SA_PASSWORD" -C -b \
+                 -Q "IF DB_ID('frase_test') IS NULL CREATE DATABASE frase_test" > /dev/null 2>&1; then
+              echo "SQL Server is ready (attempt $attempt)"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sqlserver
+          exit 1
+
+      - name: Test with coverage (fails below 70%; SQL Server tests may not be skipped)
+        env:
+          TEST_DATABASE_URL: mssql://sa:${{ env.SA_PASSWORD }}@localhost:1433/frase_test
+          REQUIRE_SQL_TESTS: "1"
+        run: pytest --cov --cov-report=term-missing --cov-fail-under=70
+
+  validate:
+    name: validate system.yaml and OpenAPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install the validators
+        run: pip install check-jsonschema==0.38.2 openapi-spec-validator==0.9.0
+
+      - name: system.yaml against system.schema.json
+        run: |
+          if [ ! -f system.schema.json ]; then
+            echo "::error file=system.yaml::system.schema.json (provided with the brief) is not in the repository root"
+            exit 1
+          fi
+          check-jsonschema --schemafile system.schema.json system.yaml
+
+      - name: Each openapi.yaml against the OpenAPI specification
+        run: openapi-spec-validator services/content/openapi.yaml services/scheduler/openapi.yaml
+
+  integration:
+    name: integration (compose stack)
+    runs-on: ubuntu-latest
+    env:
+      GIT_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make throwaway database passwords for this run (compose reads them from the environment)
+        run: |
+          for name in MSSQL_SA_PASSWORD CONTENT_DB_PASSWORD SCHEDULER_DB_PASSWORD; do
+            value="Ci_$(openssl rand -hex 16)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Build every image (a failed build fails the pipeline)
+        run: docker compose build
+
+      - name: Start the whole stack
+        run: docker compose up -d
+
+      - name: Wait until both services report healthy
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8001/health && curl -fsS http://localhost:8002/health; then
+              echo
+              echo "both healthy (attempt $attempt)"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install the integration test tools
+        run: pip install pytest==9.1.1 requests==2.34.2
+
+      - name: Cross-seam tests, both services up
+        working-directory: tests/integration
+        run: pytest -m "not content_down"
+
+      - name: Migrations ran once, and a restart applies nothing
+        run: |
+          docker compose logs content | grep "migration applied: 001_init"
+          docker compose logs scheduler | grep "migration applied: 001_init"
+          docker compose restart content
+          for attempt in $(seq 1 30); do
+            curl -fsS http://localhost:8001/health > /dev/null && break
+            sleep 2
+          done
+          docker compose logs content | grep "migrations: nothing to apply"
+          docker compose logs content | grep -c "seed: imported 3000 sentences" | grep -x 1
+
+      - name: Stop content
+        run: docker compose stop content
+
+      - name: Partial-failure tests, content stopped
+        working-directory: tests/integration
+        run: pytest -m content_down
+
+      - name: Show the service logs (method, path, status, duration per request)
+        if: always()
+        run: docker compose logs content scheduler | tail -n 80
+
+      - name: Remove the stack and its volume
+        if: always()
+        run: docker compose down -v
