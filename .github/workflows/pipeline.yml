@@ -34,9 +34,9 @@ jobs:
       run:
         working-directory: services/${{ matrix.service }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
           cache: pip
@@ -80,14 +80,17 @@ jobs:
     name: validate system.yaml and OpenAPI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
 
       - name: Install the validators
         run: pip install check-jsonschema==0.38.2 openapi-spec-validator==0.9.0
+
+      - name: Each openapi.yaml against the OpenAPI specification
+        run: openapi-spec-validator services/content/openapi.yaml services/scheduler/openapi.yaml
 
       - name: system.yaml against system.schema.json
         run: |
@@ -97,16 +100,13 @@ jobs:
           fi
           check-jsonschema --schemafile system.schema.json system.yaml
 
-      - name: Each openapi.yaml against the OpenAPI specification
-        run: openapi-spec-validator services/content/openapi.yaml services/scheduler/openapi.yaml
-
   integration:
     name: integration (compose stack)
     runs-on: ubuntu-latest
     env:
       GIT_SHA: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Make throwaway database passwords for this run (compose reads them from the environment)
         run: |
@@ -134,7 +134,7 @@ jobs:
           done
           exit 1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
 
