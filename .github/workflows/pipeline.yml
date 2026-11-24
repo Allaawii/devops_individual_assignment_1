@@ -2,10 +2,15 @@
 # CI, on every push and pull request: lint and test each service against a real SQL Server,
 # with a 70% coverage gate; validate system.yaml and both OpenAPI documents; build every image
 # and run the cross-seam tests against the compose stack, including content being stopped.
-# CD jobs (push to main only, after all CI jobs pass) are added below the CI jobs.
+# CD, on a push to main only and only after every CI job passed on that same commit: push both
+# images to GHCR tagged with the commit SHA, deploy them to Azure Container Apps, publish the UI
+# to the Static Web App with the services' URLs in config.js, then poll both /health endpoints.
 #
 # No secret is stored here. CI never touches Azure SQL: every database password used in CI
-# is generated inside the run, masked in the logs, and thrown away with the run.
+# is generated inside the run, masked in the logs, and thrown away with the run. CD reads its
+# secrets from GitHub Actions secrets (AZURE_CREDENTIALS, SWA_DEPLOYMENT_TOKEN,
+# CONTENT_DATABASE_URL, SCHEDULER_DATABASE_URL) and hands the database URLs to Container Apps
+# as Container Apps secrets, never as plain environment variables.
 
 name: pipeline
 
@@ -15,6 +20,11 @@ on:
 
 permissions:
   contents: read
+
+env:
+  REGISTRY: ghcr.io/allaawii     # GHCR wants a lower-case owner
+  PREFIX: aalsamar-ieu2024
+  RESOURCE_GROUP: rg-sdd-3b
 
 # A newer push to the same branch cancels the older run, except on main, where a deploy
 # must never be cut off halfway.
@@ -171,3 +181,133 @@ jobs:
       - name: Remove the stack and its volume
         if: always()
         run: docker compose down -v
+
+  # ----- CD: push to main only, after all three CI jobs passed on this commit -----
+
+  images:
+    name: push image (${{ matrix.service }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, validate, integration]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write             # lets GITHUB_TOKEN push to this account's GHCR
+    strategy:
+      matrix:
+        service: [content, scheduler]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sign in to GHCR with the run's own token
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Build and push, tagged with the commit SHA (and latest)
+        run: |
+          image="$REGISTRY/frase-${{ matrix.service }}"
+          docker build services/${{ matrix.service }} \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+            --tag "$image:${{ github.sha }}" --tag "$image:latest"
+          docker push --all-tags "$image"
+
+  deploy:
+    name: deploy to Azure Container Apps
+    needs: images
+    runs-on: ubuntu-latest
+    outputs:
+      content_url: ${{ steps.urls.outputs.content_url }}
+      scheduler_url: ${{ steps.urls.outputs.scheduler_url }}
+    steps:
+      - name: Sign in to Azure with the class service principal
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Look up the public addresses
+        id: urls
+        run: |
+          fqdn() { az containerapp show --name "$PREFIX-$1" --resource-group "$RESOURCE_GROUP" \
+                     --query properties.configuration.ingress.fqdn --output tsv; }
+          ui_host=$(az staticwebapp show --name "$PREFIX-ui" --resource-group "$RESOURCE_GROUP" \
+                      --query defaultHostname --output tsv)
+          echo "content_url=https://$(fqdn content)" >> "$GITHUB_OUTPUT"
+          echo "scheduler_url=https://$(fqdn scheduler)" >> "$GITHUB_OUTPUT"
+          echo "ui_origin=https://$ui_host" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy content (database URL as a Container Apps secret)
+        env:
+          DATABASE_URL: ${{ secrets.CONTENT_DATABASE_URL }}
+        run: |
+          app="$PREFIX-content"
+          az containerapp secret set --name "$app" --resource-group "$RESOURCE_GROUP" \
+            --secrets database-url="$DATABASE_URL" --output none
+          az containerapp update --name "$app" --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY/frase-content:${{ github.sha }}" \
+            --min-replicas 0 --max-replicas 1 \
+            --set-env-vars DATABASE_URL=secretref:database-url GIT_SHA=${{ github.sha }} \
+                           CORS_ORIGIN=${{ steps.urls.outputs.ui_origin }} \
+            --output none
+
+      - name: Deploy scheduler (finds content through CONTENT_URL)
+        env:
+          DATABASE_URL: ${{ secrets.SCHEDULER_DATABASE_URL }}
+        run: |
+          app="$PREFIX-scheduler"
+          az containerapp secret set --name "$app" --resource-group "$RESOURCE_GROUP" \
+            --secrets database-url="$DATABASE_URL" --output none
+          az containerapp update --name "$app" --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY/frase-scheduler:${{ github.sha }}" \
+            --min-replicas 0 --max-replicas 1 \
+            --set-env-vars DATABASE_URL=secretref:database-url GIT_SHA=${{ github.sha }} \
+                           CORS_ORIGIN=${{ steps.urls.outputs.ui_origin }} \
+                           CONTENT_URL=${{ steps.urls.outputs.content_url }} \
+            --output none
+
+  ui:
+    name: deploy the UI to Static Web Apps
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Write config.js with the deployed services' URLs
+        run: |
+          cat > ui/config.js <<EOF
+          // Written by the deploy job for commit ${{ github.sha }}.
+          window.FRASE_CONFIG = {
+            contentUrl: "${{ needs.deploy.outputs.content_url }}",
+            schedulerUrl: "${{ needs.deploy.outputs.scheduler_url }}",
+          };
+          EOF
+          cat ui/config.js
+
+      - name: Upload ui/ as it is (plain static files, nothing to build)
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.SWA_DEPLOYMENT_TOKEN }}
+          action: upload
+          app_location: ui
+          output_location: ""
+          skip_app_build: true
+
+  smoke:
+    name: health check after deploy
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Both services answer /health with 200 within 4 minutes
+        run: |
+          # A cold start plus a paused database resuming can take over a minute, so poll.
+          for attempt in $(seq 1 24); do
+            content=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${{ needs.deploy.outputs.content_url }}/health" || true)
+            scheduler=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${{ needs.deploy.outputs.scheduler_url }}/health" || true)
+            echo "attempt $attempt: content $content, scheduler $scheduler"
+            if [ "$content" = 200 ] && [ "$scheduler" = 200 ]; then
+              curl -s "${{ needs.deploy.outputs.content_url }}/health"; echo
+              curl -s "${{ needs.deploy.outputs.scheduler_url }}/health"; echo
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::a service did not report healthy within 4 minutes"
+          exit 1
