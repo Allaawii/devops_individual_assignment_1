@@ -1,17 +1,17 @@
 # yaml-language-server: $schema=./system.schema.json
-student: aalsamar.ieu2024
-prefix: aalsamar-ieu2024
+student: aalsamara.ieu2024
+prefix: aalsamara-ieu2024
 # The UI storage account's static website endpoint. The zone number (z<N>) is assigned when the
 # account is created by infra/setup.sh; this line is updated to the real address after setup.
-public_url: https://aalsamarieu2024ui.z6.web.core.windows.net
+public_url: https://aalsamaraieu2024ui.z6.web.core.windows.net
 ui:
   path: ui
-  storage_account: aalsamarieu2024ui
+  storage_account: aalsamaraieu2024ui
   calls: [content, scheduler]
 azure:
-  resource_group: rg-aalsamar-ieu2024
-  container_apps_environment: aalsamar-ieu2024-env
-  sql_server: aalsamar-ieu2024-sql
+  resource_group: rg-aalsamara-ieu2024
+  container_apps_environment: aalsamara-ieu2024-env
+  sql_server: aalsamara-ieu2024-sql
   registry: ghcr.io/allaawii
 services:
   content:
@@ -31,8 +31,8 @@ services:
       DB_RETRY_SECONDS: { default: 90, description: "How long startup keeps retrying the database connection (Azure SQL resuming from pause)" }
     calls: []
     azure:
-      container_app: aalsamar-ieu2024-content
-      sql_database: aalsamar-ieu2024-content-db
+      container_app: aalsamara-ieu2024-content
+      sql_database: aalsamara-ieu2024-content-db
   scheduler:
     description: >-
       Cards, reviews, the daily goal and the placement level, scheduled with SM-2 or Leitner. Pulls
@@ -62,5 +62,5 @@ services:
           again"); the dashboard numbers, the daily goal, rating a card and skipping the quiz keep working.
           Each call is tried once.
     azure:
-      container_app: aalsamar-ieu2024-scheduler
-      sql_database: aalsamar-ieu2024-scheduler-db
+      container_app: aalsamara-ieu2024-scheduler
+      sql_database: aalsamara-ieu2024-scheduler-db

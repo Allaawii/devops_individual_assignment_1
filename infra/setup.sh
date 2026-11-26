@@ -19,9 +19,9 @@
 
 set -euo pipefail
 
-PREFIX=aalsamar-ieu2024
+PREFIX=aalsamara-ieu2024
 RESOURCE_GROUP="rg-$PREFIX"
-STORAGE_ACCOUNT=aalsamarieu2024ui            # the prefix without hyphens, then "ui"
+STORAGE_ACCOUNT=aalsamaraieu2024ui            # the prefix without hyphens, then "ui"
 ENVIRONMENT="$PREFIX-env"
 SQL_SERVER="$PREFIX-sql"
 SQL_ADMIN=frase_admin
