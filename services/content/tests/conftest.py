@@ -1,7 +1,8 @@
 """Shared test fixtures.
 
 Most tests use in-memory fakes and need nothing installed. The SQL Server fixtures read
-TEST_DATABASE_URL (CI always sets it); when it is not set, the tests that use them are skipped.
+TEST_DATABASE_URL (CI always sets it); when it is not set, the tests that use them are skipped,
+unless REQUIRE_SQL_TESTS is set (as in CI), which turns the skip into a failure.
 """
 
 import os
@@ -76,6 +77,8 @@ def client(app) -> FlaskClient:
 @pytest.fixture
 def database_url() -> str:
     if not TEST_DATABASE_URL:
+        if os.environ.get("REQUIRE_SQL_TESTS"):   # set in CI: a skipped SQL Server test would hide a gap
+            pytest.fail("REQUIRE_SQL_TESTS is set but TEST_DATABASE_URL is not")
         pytest.skip("TEST_DATABASE_URL is not set: SQL Server tests run in CI or against the compose database")
     return TEST_DATABASE_URL
 
