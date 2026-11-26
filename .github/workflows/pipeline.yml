@@ -3,14 +3,14 @@
 # with a 70% coverage gate; validate system.yaml and both OpenAPI documents; build every image
 # and run the cross-seam tests against the compose stack, including content being stopped.
 # CD, on a push to main only and only after every CI job passed on that same commit: push both
-# images to GHCR tagged with the commit SHA, deploy them to Azure Container Apps, publish the UI
-# to the Static Web App with the services' URLs in config.js, then poll both /health endpoints.
+# images to GHCR tagged with the commit SHA, deploy them to Azure Container Apps, upload the UI
+# to the storage account's static website with the services' URLs in config.js, then poll /health.
 #
 # No secret is stored here. CI never touches Azure SQL: every database password used in CI
-# is generated inside the run, masked in the logs, and thrown away with the run. CD reads its
-# secrets from GitHub Actions secrets (AZURE_CREDENTIALS, SWA_DEPLOYMENT_TOKEN,
-# CONTENT_DATABASE_URL, SCHEDULER_DATABASE_URL) and hands the database URLs to Container Apps
-# as Container Apps secrets, never as plain environment variables.
+# is generated inside the run, masked in the logs, and thrown away with the run. CD signs in to
+# Azure as a managed identity through GitHub's OIDC token (no Azure password exists anywhere),
+# and reads the two database passwords from GitHub Actions secrets; the connection strings
+# built from them reach Container Apps as Container Apps secrets, never as plain variables.
 
 name: pipeline
 
@@ -23,8 +23,6 @@ permissions:
 
 env:
   REGISTRY: ghcr.io/allaawii     # GHCR wants a lower-case owner
-  PREFIX: aalsamar-ieu2024
-  RESOURCE_GROUP: rg-sdd-3b
 
 # A newer push to the same branch cancels the older run, except on main, where a deploy
 # must never be cut off halfway.
@@ -183,6 +181,7 @@ jobs:
         run: docker compose down -v
 
   # ----- CD: push to main only, after all three CI jobs passed on this commit -----
+  # PREFIX, RESOURCE_GROUP and UI_STORAGE are GitHub Actions variables set by infra/setup.sh.
 
   images:
     name: push image (${{ matrix.service }})
@@ -202,9 +201,11 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
 
       - name: Build and push, tagged with the commit SHA (and latest)
+        # --provenance=false: a provenance attestation turns the image into a list that
+        # Container Apps cannot pull.
         run: |
           image="$REGISTRY/frase-${{ matrix.service }}"
-          docker build services/${{ matrix.service }} \
+          docker build services/${{ matrix.service }} --provenance=false \
             --build-arg GIT_SHA=${{ github.sha }} \
             --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
             --tag "$image:${{ github.sha }}" --tag "$image:latest"
@@ -214,33 +215,42 @@ jobs:
     name: deploy to Azure Container Apps
     needs: images
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write             # lets azure/login exchange GitHub's OIDC token for Azure access
+      contents: read
+    env:
+      PREFIX: ${{ vars.PREFIX }}
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
     outputs:
       content_url: ${{ steps.urls.outputs.content_url }}
       scheduler_url: ${{ steps.urls.outputs.scheduler_url }}
     steps:
-      - name: Sign in to Azure with the class service principal
+      - name: Sign in to Azure as the pipeline's managed identity
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Look up the public addresses
         id: urls
         run: |
           fqdn() { az containerapp show --name "$PREFIX-$1" --resource-group "$RESOURCE_GROUP" \
                      --query properties.configuration.ingress.fqdn --output tsv; }
-          ui_host=$(az staticwebapp show --name "$PREFIX-ui" --resource-group "$RESOURCE_GROUP" \
-                      --query defaultHostname --output tsv)
+          ui_url=$(az storage account show --name "${{ vars.UI_STORAGE }}" --resource-group "$RESOURCE_GROUP" \
+                     --query primaryEndpoints.web --output tsv)
           echo "content_url=https://$(fqdn content)" >> "$GITHUB_OUTPUT"
           echo "scheduler_url=https://$(fqdn scheduler)" >> "$GITHUB_OUTPUT"
-          echo "ui_origin=https://$ui_host" >> "$GITHUB_OUTPUT"
+          echo "ui_origin=${ui_url%/}" >> "$GITHUB_OUTPUT"      # the CORS origin has no trailing slash
 
-      - name: Deploy content (database URL as a Container Apps secret)
+      - name: Deploy content (connection string as a Container Apps secret)
         env:
-          DATABASE_URL: ${{ secrets.CONTENT_DATABASE_URL }}
+          DB_PASSWORD: ${{ secrets.CONTENT_DB_PASSWORD }}
         run: |
           app="$PREFIX-content"
+          url="mssql://content_svc:$DB_PASSWORD@$PREFIX-sql.database.windows.net:1433/$PREFIX-content-db"
           az containerapp secret set --name "$app" --resource-group "$RESOURCE_GROUP" \
-            --secrets database-url="$DATABASE_URL" --output none
+            --secrets database-url="$url" --output none
           az containerapp update --name "$app" --resource-group "$RESOURCE_GROUP" \
             --image "$REGISTRY/frase-content:${{ github.sha }}" \
             --min-replicas 0 --max-replicas 1 \
@@ -250,11 +260,12 @@ jobs:
 
       - name: Deploy scheduler (finds content through CONTENT_URL)
         env:
-          DATABASE_URL: ${{ secrets.SCHEDULER_DATABASE_URL }}
+          DB_PASSWORD: ${{ secrets.SCHEDULER_DB_PASSWORD }}
         run: |
           app="$PREFIX-scheduler"
+          url="mssql://scheduler_svc:$DB_PASSWORD@$PREFIX-sql.database.windows.net:1433/$PREFIX-scheduler-db"
           az containerapp secret set --name "$app" --resource-group "$RESOURCE_GROUP" \
-            --secrets database-url="$DATABASE_URL" --output none
+            --secrets database-url="$url" --output none
           az containerapp update --name "$app" --resource-group "$RESOURCE_GROUP" \
             --image "$REGISTRY/frase-scheduler:${{ github.sha }}" \
             --min-replicas 0 --max-replicas 1 \
@@ -264,9 +275,12 @@ jobs:
             --output none
 
   ui:
-    name: deploy the UI to Static Web Apps
+    name: publish the UI (storage static website)
     needs: deploy
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v5
 
@@ -281,14 +295,19 @@ jobs:
           EOF
           cat ui/config.js
 
-      - name: Upload ui/ as it is (plain static files, nothing to build)
-        uses: Azure/static-web-apps-deploy@v1
+      - name: Sign in to Azure as the pipeline's managed identity
+        uses: azure/login@v2
         with:
-          azure_static_web_apps_api_token: ${{ secrets.SWA_DEPLOYMENT_TOKEN }}
-          action: upload
-          app_location: ui
-          output_location: ""
-          skip_app_build: true
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload ui/ to the $web container (plain static files, nothing to build)
+        run: |
+          az storage blob upload-batch --account-name "${{ vars.UI_STORAGE }}" --auth-mode key \
+            --destination '$web' --source ui --overwrite --output none
+          echo "published to $(az storage account show --name "${{ vars.UI_STORAGE }}" \
+            --query primaryEndpoints.web --output tsv)"
 
   smoke:
     name: health check after deploy
