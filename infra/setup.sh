@@ -18,6 +18,9 @@
 # Running it again is safe: whatever already exists is left as it is.
 
 set -euo pipefail
+# Git Bash on Windows rewrites arguments that start with "/" into Windows paths, which breaks
+# Azure resource ids such as /subscriptions/...; this turns that off (no effect elsewhere).
+export MSYS_NO_PATHCONV=1
 
 PREFIX=aalsamara-ieu2024
 RESOURCE_GROUP="rg-$PREFIX"
@@ -42,8 +45,19 @@ ask_password() {               # ask_password <variable> <prompt>: read a passwo
   local value
   read -rsp "$2: " value
   echo
-  if [[ ! $value =~ ^[A-Za-z0-9._-]{12,}$ || ! $value =~ [A-Z] || ! $value =~ [a-z] || ! $value =~ [0-9] ]]; then
-    echo "Use at least 12 characters from A-Z a-z 0-9 . _ - with upper case, lower case and digits." >&2
+  # The terminal can slip escape sequences into what is read: "bracketed paste" markers around a
+  # paste (ESC[200~ ... ESC[201~) and focus notices when the window is clicked (ESC[I, ESC[O).
+  # A Windows terminal may also add a carriage return. Remove every escape sequence, then any
+  # other invisible character and surrounding spaces.
+  value=$(printf '%s' "$value" | sed -E $'s/\e\\[[0-9;?]*[A-Za-z~]//g' | tr -d '[:cntrl:]' | sed 's/^ *//; s/ *$//')
+  local problem=""
+  if (( ${#value} < 12 )); then problem="it is shorter than 12 characters"
+  elif [[ $value =~ [^A-Za-z0-9._-] ]]; then problem="it has a character other than A-Z a-z 0-9 . _ -"
+  elif [[ ! $value =~ [A-Z] || ! $value =~ [a-z] || ! $value =~ [0-9] ]]; then
+    problem="it needs an upper-case letter, a lower-case letter and a digit"
+  fi
+  if [[ -n $problem ]]; then
+    echo "Password rejected: $problem." >&2
     exit 1
   fi
   printf -v "$1" '%s' "$value"
@@ -112,12 +126,23 @@ az sql server firewall-rule create --resource-group "$RESOURCE_GROUP" --server "
 trap 'az sql server firewall-rule delete --resource-group "$RESOURCE_GROUP" --server "$SQL_SERVER" \
         --name setup-temporary --output none' EXIT      # the temporary rule goes, even on failure
 export SQLCMDPASSWORD="$SQL_ADMIN_PASSWORD"             # sqlcmd reads the admin password from here
+run_sql() {                    # run_sql <database> <sql>, retried while a paused database resumes (40613)
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    if sqlcmd -S "tcp:$SQL_SERVER.database.windows.net,1433" -d "$1" -U "$SQL_ADMIN" -b -Q "$2"; then
+      return 0
+    fi
+    echo "   $1 is not ready yet (a paused database takes up to a minute to resume); retrying in 20 s"
+    sleep 20
+  done
+  return 1
+}
 for service in "${SERVICES[@]}"; do
   user="${service}_svc"
   password_variable="${service^^}_PASSWORD"
   password="${!password_variable}"
   # A contained user lives inside its database only, so it cannot reach the other service's data.
-  sqlcmd -S "tcp:$SQL_SERVER.database.windows.net,1433" -d "$PREFIX-$service-db" -U "$SQL_ADMIN" -b -Q "
+  run_sql "$PREFIX-$service-db" "
     IF DATABASE_PRINCIPAL_ID(N'$user') IS NULL CREATE USER $user WITH PASSWORD = N'$password';
     ELSE ALTER USER $user WITH PASSWORD = N'$password';
     ALTER ROLE db_ddladmin ADD MEMBER $user;

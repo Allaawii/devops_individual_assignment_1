@@ -1,9 +1,8 @@
 # yaml-language-server: $schema=./system.schema.json
 student: aalsamara.ieu2024
 prefix: aalsamara-ieu2024
-# The UI storage account's static website endpoint. The zone number (z<N>) is assigned when the
-# account is created by infra/setup.sh; this line is updated to the real address after setup.
-public_url: https://aalsamaraieu2024ui.z6.web.core.windows.net
+# The UI storage account's static website endpoint: the system's public address and its only CORS origin.
+public_url: https://aalsamaraieu2024ui.z28.web.core.windows.net
 ui:
   path: ui
   storage_account: aalsamaraieu2024ui
