@@ -29,9 +29,17 @@ async function call(baseUrl, path, { method = "GET", body } = {}) {
     clearTimeout(timer);
   }
   const data = await response.json().catch(() => null); // an error page that is not JSON gives null
+  if (!response.ok && data?.error) {
+    throw new ApiError(response.status, data.error, data.message); // a designed error from our service
+  }
+  if (!response.ok && [502, 503, 504].includes(response.status)) {
+    // Azure itself answers 503 "App port is not ready" while a container that scaled to zero
+    // starts and its database resumes (up to about a minute).
+    throw new ApiError(response.status, "starting_up",
+                       "The service is starting up after being idle. Try again in a few seconds.");
+  }
   if (!response.ok) {
-    throw new ApiError(response.status, data?.error ?? "http_error",
-                       data?.message ?? `The service answered with status ${response.status}.`);
+    throw new ApiError(response.status, "http_error", `The service answered with status ${response.status}.`);
   }
   return data;
 }

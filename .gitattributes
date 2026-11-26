@@ -1,0 +1,2 @@
+# Shell scripts run in bash (Azure Cloud Shell, Linux CI); Windows line endings would break them.
+*.sh text eol=lf
