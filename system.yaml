@@ -1,14 +1,15 @@
 # yaml-language-server: $schema=./system.schema.json
 student: aalsamar.ieu2024
 prefix: aalsamar-ieu2024
-# The Static Web App's address; Azure assigns the host name when the app is created (setup step 6).
-public_url: https://aalsamar-ieu2024-ui.azurestaticapps.net
+# The UI storage account's static website endpoint. The zone number (z<N>) is assigned when the
+# account is created by infra/setup.sh; this line is updated to the real address after setup.
+public_url: https://aalsamarieu2024ui.z6.web.core.windows.net
 ui:
   path: ui
-  static_web_app: aalsamar-ieu2024-ui
+  storage_account: aalsamarieu2024ui
   calls: [content, scheduler]
 azure:
-  resource_group: rg-sdd-3b
+  resource_group: rg-aalsamar-ieu2024
   container_apps_environment: aalsamar-ieu2024-env
   sql_server: aalsamar-ieu2024-sql
   registry: ghcr.io/allaawii
