@@ -1,136 +1,197 @@
 # Diagrams
 
-## Architecture
+## Before: the Assignment 1 monolith
 
-One Flask process and one SQLite file. The two domains never import each other: `create_app()`
-(the composition root) builds both facades and subscribes the scheduler to new sentences (ADR-2).
-The review routes are the only code that calls both facades: `ReviewService` picks the card by ID,
-then `ContentService` supplies the text to show.
+One Flask process and one SQLite file. The two domains lived in one codebase and never imported each other: `create_app()` wired them together, and new sentences reached the scheduler through an in-process Observer call.
 
 ```mermaid
 flowchart TB
-    browser["Browser<br/>(Jinja pages, one CSS file, no JavaScript)"]
+    browser["Browser<br/>(server-rendered Jinja pages)"]
 
     subgraph process["One process: python app.py"]
         root["create_app()<br/>composition root"]
-
-        subgraph content["trainer/content"]
-            content_routes["content routes<br/>/sentences, /words"]
-            content_service["ContentService<br/>Facade + Observer subject"]
-            helpers["tokenizer · grammar_rules · placement<br/>(pure functions)"]
-            content_repos["SentenceRepository<br/>WordRepository"]
-        end
-
-        subgraph scheduler["trainer/scheduler"]
-            review_routes["review routes<br/>/, /goal, /placement, /review"]
-            review_service["ReviewService<br/>Facade + Observer listener"]
-            strategy["SchedulingStrategy<br/>SM2Strategy or LeitnerStrategy"]
-            scheduler_repos["CardRepository · ReviewLog<br/>SettingsStore"]
-        end
-
-        db["db.py<br/>one connection and one transaction per request"]
+        content_service["ContentService<br/>(sentences, words, quiz)"]
+        review_service["ReviewService<br/>(cards, reviews, goal)"]
+        db["db.py<br/>one connection per request"]
     end
 
-    sqlite[("SQLite<br/>$DATA_DIR/trainer.db")]
-    seed[/"seed/sentences.tsv, words.tsv<br/>(3,000 Tatoeba sentences)"/]
+    sqlite[("One SQLite file<br/>all six tables")]
 
-    browser -->|HTTP| content_routes
-    browser -->|HTTP| review_routes
-    content_routes --> content_service
-    review_routes --> review_service
-    review_routes -.->|"card text by ID"| content_service
-    content_service --> helpers
-    content_service --> content_repos
-    content_service -.->|"on_sentence_added(sentence_id, word_ids)"| review_service
-    review_service --> strategy
-    review_service --> scheduler_repos
-    content_repos --> db
-    scheduler_repos --> db
+    browser -->|HTTP| process
+    root -.->|"builds and subscribes"| content_service
+    root -.-> review_service
+    content_service -.->|"Observer: on_sentence_added()"| review_service
+    content_service --> db
+    review_service --> db
     db --> sqlite
-    root -.->|"builds, wires, subscribes"| content_service
-    root -.->|"builds, picks strategy from SCHEDULER"| review_service
-    seed -->|"first start, only if the database is empty"| root
 ```
 
-Solid arrows are calls. Dashed arrows are the wiring done once at startup, the Observer
-notification, and the one place where a route reads from the other domain.
+## After: two services, two databases, a static UI
 
-## Adding a sentence: from the form to the new cards
+Each service has its own code, image, migrations and database. The only connection between them is HTTP: the scheduler calls 4 content endpoints, each with a timeout. Content never calls the scheduler.
+
+```mermaid
+flowchart TB
+    browser["Browser"]
+    ui["UI: static HTML, CSS, JS<br/>config.js = the two service URLs"]
+
+    subgraph content_svc["content service (Flask + gunicorn)"]
+        content_api["JSON API<br/>/sentences, /sentences/feed, /words,<br/>/placement/quiz, /placement/score, /health"]
+        content_service["ContentService<br/>tokenizer · grammar rules · placement"]
+    end
+
+    subgraph scheduler_svc["scheduler service (Flask + gunicorn)"]
+        scheduler_api["JSON API<br/>/review/next, /review/{id}, /goal,<br/>/placement, /stats, /health"]
+        review_service["ReviewService<br/>SM-2 or Leitner"]
+        client["HttpContentClient<br/>2 s timeout, no retries"]
+    end
+
+    content_db[("content database<br/>sentences · words · sentence_words")]
+    scheduler_db[("scheduler database<br/>cards · reviews · settings")]
+
+    browser --> ui
+    ui -->|"fetch + CORS"| content_api
+    ui -->|"fetch + CORS"| scheduler_api
+    content_api --> content_service --> content_db
+    scheduler_api --> review_service --> scheduler_db
+    review_service --> client
+    client -->|"GET /sentences/feed, GET /sentences/{id},<br/>GET /words/{id}, POST /placement/score"| content_api
+```
+
+## Deployment
+
+```mermaid
+flowchart LR
+    dev["git push / merge to main"] --> gha
+
+    subgraph gha["GitHub Actions: pipeline.yml"]
+        ci["CI: test x2, validate,<br/>integration (compose)"] --> images["images: build,<br/>tag with the SHA"]
+        images --> deploy["deploy"] --> ui_job["ui"]
+        deploy --> smoke["smoke: /health x2"]
+    end
+
+    images -->|push| ghcr[("GHCR<br/>frase-content:SHA<br/>frase-scheduler:SHA")]
+
+    subgraph azure["Azure for Students: rg-aalsamara-ieu2024 (France Central)"]
+        subgraph env["Container Apps environment aalsamara-ieu2024-env"]
+            content_app["aalsamara-ieu2024-content<br/>0-1 replicas"]
+            scheduler_app["aalsamara-ieu2024-scheduler<br/>0-1 replicas"]
+        end
+        subgraph sql["SQL server aalsamara-ieu2024-sql (serverless, free offer)"]
+            content_db[("content-db")]
+            scheduler_db[("scheduler-db")]
+        end
+        storage["Storage static website<br/>aalsamaraieu2024ui"]
+        identity["Managed identity<br/>aalsamara-ieu2024-github"]
+        logs["Log Analytics<br/>(request log lines)"]
+    end
+
+    deploy -->|"OIDC sign-in"| identity
+    identity -->|"Contributor on the RG"| env
+    deploy -->|"az containerapp update<br/>--image ...:SHA"| content_app
+    deploy --> scheduler_app
+    ghcr -->|pull| content_app
+    ghcr -->|pull| scheduler_app
+    ui_job -->|"upload ui/ + config.js"| storage
+    content_app -->|"content_svc"| content_db
+    scheduler_app -->|"scheduler_svc"| scheduler_db
+    scheduler_app -->|"CONTENT_URL"| content_app
+    env --> logs
+```
+
+## The pull: how the scheduler gets new cards
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser
-    participant R as content route
-    participant C as ContentService
-    participant W as WordRepository
-    participant S as ReviewService
-    participant K as CardRepository
-    participant D as db.py teardown
+    participant U as UI
+    participant S as scheduler
+    participant SD as scheduler database
+    participant C as content
+    participant CD as content database
 
-    B->>R: POST /sentences/new
-    R->>C: add_sentence(spanish, english, note)
-    C->>C: validate, tag_grammar(), extract_words()
-    C->>W: get_or_create(word) and link(sentence, word)
-    C->>S: on_sentence_added(sentence_id, word_ids)
-    S->>K: ensure_sentence_card(), ensure_word_cards()
-    R-->>B: 302 redirect to /sentences/<id>
-    D->>D: commit (or roll back if anything raised)
+    U->>S: GET /review/next
+    S->>SD: a due card? a new card left today?
+    SD-->>S: no new card stored
+    S->>SD: newest sentence id that has a card (max_sentence_id)
+    S->>C: GET /sentences/feed?after_id=<that id>&limit=20 (2 s timeout)
+    C->>CD: next 20 sentences in id order, with their word ids
+    C-->>S: [{id, word_ids}, ...]
+    S->>SD: a sentence card plus a card per new word (unique indexes skip words that already have one)
+    S->>C: GET /sentences/{id} (the text to show)
+    C-->>S: sentence, words, key words
+    S-->>U: 200 card, text, rating previews, today's numbers
 ```
 
-## Entity-relationship diagram
+## When content is down
 
-Solid lines are real foreign keys, which exist only inside a domain.
-Dashed lines are plain ID references across the domain boundary, with no foreign key (see ADR-3).
+```mermaid
+sequenceDiagram
+    participant U as UI
+    participant S as scheduler
+    participant C as content (stopped)
+
+    U->>S: GET /review/next
+    S->>C: GET /sentences/{id} (2 s timeout, tried once)
+    C--xS: connection refused or timeout
+    S-->>U: 503 {"error": "content_unavailable", "message": ...}
+    Note over U: shows the message and a "Try again" button
+    U->>S: GET /stats
+    S-->>U: 200 (the scheduler's own data still works)
+```
+
+## One database per service
+
+Solid lines are real foreign keys, which exist only inside one database. Dashed lines are plain IDs that point into the other service's database, with no foreign key possible (ADR-3, ADR-7). Content never deletes sentences or words, so those IDs stay valid.
 
 ```mermaid
 erDiagram
     SENTENCES ||--o{ SENTENCE_WORDS : "contains"
     WORDS     ||--o{ SENTENCE_WORDS : "appears in"
-    SENTENCES ||..o| CARDS : "sentence_id (ID only, no FK)"
-    WORDS     ||..o| CARDS : "word_id (ID only, no FK)"
+    SENTENCES ||..o| CARDS : "sentence_id (ID only, other database)"
+    WORDS     ||..o| CARDS : "word_id (ID only, other database)"
     CARDS     ||--o{ REVIEWS : "reviewed as"
 
     SENTENCES {
-        int  id PK
-        text spanish_text UK
-        text english_text
-        text grammar_note "nullable"
-        text source "'user' or Tatoeba attribution"
-        text created_at "ISO-8601"
+        int      id PK
+        nvarchar spanish_text UK "accent- and case-sensitive"
+        nvarchar english_text
+        nvarchar grammar_note "nullable"
+        nvarchar source "'user' or Tatoeba attribution"
+        datetime2 created_at
+        tinyint  level "0-4, added by migration 002; NULL for the learner's own"
     }
     WORDS {
-        int  id PK
-        text headword UK "lowercase"
-        text meaning "nullable until the learner fills it in"
-        int  frequency_rank "nullable; from the seed build"
+        int      id PK
+        nvarchar headword UK "lowercase"
+        nvarchar meaning "nullable until the learner fills it in"
+        int      frequency_rank "nullable; from the seed build"
     }
     SENTENCE_WORDS {
         int sentence_id PK, FK
         int word_id PK, FK
     }
     CARDS {
-        int  id PK "id order = introduction order"
-        text card_type "'word' or 'sentence'"
-        int  word_id "partial unique index"
-        int  sentence_id "partial unique index"
-        real ease_factor "default 2.5"
-        int  interval_days "default 0"
-        int  repetitions "SM-2 streak or Leitner box"
-        text due_date "NULL = new card"
+        int      id PK "id order = introduction order"
+        nvarchar card_type "'word' or 'sentence'"
+        int      word_id "filtered unique index"
+        int      sentence_id "filtered unique index"
+        float    ease_factor "default 2.5"
+        int      interval_days "default 0"
+        int      repetitions "SM-2 streak or Leitner box"
+        date     due_date "NULL = new card"
     }
     REVIEWS {
-        int  id PK
-        int  card_id FK
-        text reviewed_at
-        int  quality "0-5"
-        int  resulting_interval
-        real resulting_ease
+        int       id PK
+        int       card_id FK
+        datetime2 reviewed_at
+        tinyint   quality "0-5"
+        int       resulting_interval
+        float     resulting_ease
     }
     SETTINGS {
-        text key PK "'new_cards_per_day' or 'level'"
-        text value
+        nvarchar setting_key PK "'new_cards_per_day', 'level', 'level_name'"
+        nvarchar setting_value
     }
 ```
 
-The content domain owns `sentences`, `words` and `sentence_words`.
-The scheduler domain owns `cards`, `reviews` and `settings` (the learner's daily goal and quiz level).
+The content database (`sentences`, `words`, `sentence_words`) belongs to the content service, and the scheduler database (`cards`, `reviews`, `settings`) to the scheduler. Each database also has `schema_migrations` (which migrations ran) and `health_check` (one row that `/health` writes to).
