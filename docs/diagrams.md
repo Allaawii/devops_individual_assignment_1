@@ -35,19 +35,19 @@ flowchart TB
     browser["Browser"]
     ui["UI: static HTML, CSS, JS<br/>config.js = the two service URLs"]
 
-    subgraph content_svc["content service (Flask + gunicorn)"]
+    subgraph content_svc["content service"]
         content_api["JSON API<br/>/sentences, /sentences/feed, /words,<br/>/placement/quiz, /placement/score, /health"]
-        content_service["ContentService<br/>tokenizer · grammar rules · placement"]
+        content_service["ContentService<br/>tokenizer, grammar rules, placement"]
     end
 
-    subgraph scheduler_svc["scheduler service (Flask + gunicorn)"]
+    subgraph scheduler_svc["scheduler service"]
         scheduler_api["JSON API<br/>/review/next, /review/{id}, /goal,<br/>/placement, /stats, /health"]
         review_service["ReviewService<br/>SM-2 or Leitner"]
         client["HttpContentClient<br/>2 s timeout, no retries"]
     end
 
-    content_db[("content database<br/>sentences · words · sentence_words")]
-    scheduler_db[("scheduler database<br/>cards · reviews · settings")]
+    content_db[("content database<br/>sentences, words, sentence_words")]
+    scheduler_db[("scheduler database<br/>cards, reviews, settings")]
 
     browser --> ui
     ui -->|"fetch + CORS"| content_api
@@ -60,43 +60,38 @@ flowchart TB
 
 ## Deployment
 
+Everything on the right lives in one resource group, `rg-aalsamara-ieu2024` (Azure for Students, France Central). The pipeline signs in as the managed identity `aalsamara-ieu2024-github` through OIDC; that identity is Contributor on this resource group only.
+
 ```mermaid
 flowchart LR
-    dev["git push / merge to main"] --> gha
+    push["merge to main"] --> ci["CI jobs<br/>test x2, validate,<br/>integration"]
+    ci --> images["images<br/>build, tag with SHA"]
+    images --> ghcr[("GHCR<br/>frase-content:SHA<br/>frase-scheduler:SHA")]
+    images --> deploy["deploy<br/>(OIDC sign-in)"]
+    deploy --> ui_job["ui<br/>config.js + upload"]
+    deploy --> smoke["smoke<br/>/health x2"]
 
-    subgraph gha["GitHub Actions: pipeline.yml"]
-        ci["CI: test x2, validate,<br/>integration (compose)"] --> images["images: build,<br/>tag with the SHA"]
-        images --> deploy["deploy"] --> ui_job["ui"]
-        deploy --> smoke["smoke: /health x2"]
-    end
-
-    images -->|push| ghcr[("GHCR<br/>frase-content:SHA<br/>frase-scheduler:SHA")]
-
-    subgraph azure["Azure for Students: rg-aalsamara-ieu2024 (France Central)"]
-        subgraph env["Container Apps environment aalsamara-ieu2024-env"]
+    subgraph rg["rg-aalsamara-ieu2024"]
+        storage["Storage static website<br/>aalsamaraieu2024ui"]
+        subgraph env["Container Apps env"]
             content_app["aalsamara-ieu2024-content<br/>0-1 replicas"]
             scheduler_app["aalsamara-ieu2024-scheduler<br/>0-1 replicas"]
         end
-        subgraph sql["SQL server aalsamara-ieu2024-sql (serverless, free offer)"]
-            content_db[("content-db")]
-            scheduler_db[("scheduler-db")]
+        subgraph sql["SQL server aalsamara-ieu2024-sql"]
+            content_db[("content-db<br/>serverless, free offer")]
+            scheduler_db[("scheduler-db<br/>serverless, free offer")]
         end
-        storage["Storage static website<br/>aalsamaraieu2024ui"]
-        identity["Managed identity<br/>aalsamara-ieu2024-github"]
-        logs["Log Analytics<br/>(request log lines)"]
+        logs["Log Analytics<br/>request log lines"]
     end
 
-    deploy -->|"OIDC sign-in"| identity
-    identity -->|"Contributor on the RG"| env
-    deploy -->|"az containerapp update<br/>--image ...:SHA"| content_app
-    deploy --> scheduler_app
-    ghcr -->|pull| content_app
-    ghcr -->|pull| scheduler_app
-    ui_job -->|"upload ui/ + config.js"| storage
-    content_app -->|"content_svc"| content_db
-    scheduler_app -->|"scheduler_svc"| scheduler_db
-    scheduler_app -->|"CONTENT_URL"| content_app
-    env --> logs
+    deploy -->|"update image to :SHA"| content_app
+    deploy -->|"update image to :SHA"| scheduler_app
+    ghcr -.->|pull| env
+    ui_job -->|"upload ui/"| storage
+    scheduler_app -->|CONTENT_URL| content_app
+    content_app -->|content_svc| content_db
+    scheduler_app -->|scheduler_svc| scheduler_db
+    env -.-> logs
 ```
 
 ## The pull: how the scheduler gets new cards
