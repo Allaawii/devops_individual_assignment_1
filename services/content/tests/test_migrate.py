@@ -104,13 +104,37 @@ def test_001_creates_the_content_schema_once(empty_database, caplog):
     caplog.set_level(logging.INFO, logger="migrate")
     conn = db.connect(empty_database)
     try:
-        assert migrate(conn, Path(MIGRATIONS_DIR)) == ["001_init"]
+        assert migrate(conn, Path(MIGRATIONS_DIR)) == ["001_init", "002_add_sentence_level"]
         assert {"sentences", "words", "sentence_words", "health_check", "schema_migrations"} <= _tables(conn)
         assert migrate(conn, Path(MIGRATIONS_DIR)) == []
     finally:
         conn.close()
     assert "migration applied: 001_init" in caplog.text
     assert "migrations: nothing to apply" in caplog.text
+
+
+def test_002_backfills_the_level_of_existing_seed_sentences(empty_database, tmp_path):
+    """The data-changing migration on a database that already has rows, as on Azure."""
+    only_001 = tmp_path / "only_001"
+    only_001.mkdir()
+    (only_001 / "001_init.sql").write_text((Path(MIGRATIONS_DIR) / "001_init.sql").read_text(encoding="utf-8"),
+                                           encoding="utf-8")
+    conn = db.connect(empty_database)
+    try:
+        migrate(conn, only_001)
+        cursor = conn.cursor()
+        for i in range(1, 11):          # 10 seed sentences, with one of the learner's own in the middle
+            source = "user" if i == 4 else "tatoeba"
+            cursor.execute("INSERT INTO sentences (spanish_text, english_text, source, created_at) "
+                           "VALUES (%s, 'x', %s, SYSUTCDATETIME())", (f"frase {i}", source))
+        conn.commit()
+        assert migrate(conn, Path(MIGRATIONS_DIR)) == ["002_add_sentence_level"]
+        cursor.execute("SELECT id, level FROM sentences ORDER BY id")
+        levels = {row["id"]: row["level"] for row in cursor.fetchall()}
+    finally:
+        conn.close()
+    # 9 seed sentences: positions 0-8 give 0,0,1,1,2,2,3,3,4 (position * 5 / 9); the learner's stays NULL.
+    assert levels == {1: 0, 2: 0, 3: 1, 4: None, 5: 1, 6: 2, 7: 2, 8: 3, 9: 3, 10: 4}
 
 
 def test_a_failing_migration_leaves_no_trace_in_sql_server(empty_database, tmp_path):

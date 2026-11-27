@@ -1,8 +1,9 @@
 """Placement quiz: find out how much Spanish the learner already knows.
 
-The seed sentences are stored easiest first, so they can be cut into equal bands, one per level.
-The quiz asks a few multiple-choice questions from every band except the hardest. The learner's
-level is the number of bands, counted from the easiest, where every answer was right.
+Every seed sentence stores its level (0-4), set by migration 002 or by the seed import with
+seed_level(), so the seed falls into one band per level. The quiz asks a few multiple-choice
+questions from every band except the hardest. The learner's level is the number of bands,
+counted from the easiest, where every answer was right.
 
 Pure functions only: no Flask and no database, so the quiz is easy to test.
 """
@@ -50,10 +51,18 @@ class _Words:
         return cls(set(extract_words(sentence.spanish_text)), set(english), len(english))
 
 
+def seed_level(position: int, total: int) -> int:
+    """The level of the seed sentence at `position` (0-based, easiest first) out of `total`.
+
+    The same formula as migration 002 (position * 5 / total with integer division), so a
+    database seeded after the migration gets the same levels as one the migration backfilled.
+    """
+    return position * len(LEVELS) // total
+
+
 def level_bands(seed: Sequence[Sentence]) -> list[Sequence[Sentence]]:
-    """Cut the easiest-first seed into len(LEVELS) equal bands (a few leftover hard ones are dropped)."""
-    size = len(seed) // len(LEVELS)
-    return [seed[i * size:(i + 1) * size] for i in range(len(LEVELS))]
+    """The seed grouped by its stored level, one band per level, keeping the seed's order."""
+    return [[sentence for sentence in seed if sentence.level == level] for level in range(len(LEVELS))]
 
 
 def build_quiz(seed: Sequence[Sentence]) -> list[Question]:
@@ -63,7 +72,7 @@ def build_quiz(seed: Sequence[Sentence]) -> list[Question]:
     always gives the same quiz, so answers can be checked by building it again.
     """
     bands = level_bands(seed)
-    if len(bands[0]) < OPTION_COUNT + QUESTIONS_PER_LEVEL:
+    if min(len(band) for band in bands) < OPTION_COUNT + QUESTIONS_PER_LEVEL:
         return []
     words = {sentence.id: _Words.of(sentence) for sentence in seed}
     return [_question(band[position], level, seed, words)

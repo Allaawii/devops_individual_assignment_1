@@ -9,7 +9,7 @@ from datetime import datetime
 
 from content.grammar_rules import tag_grammar
 from content.models import USER_SOURCE, FeedItem, Page, PlacementResult, Sentence, SentenceDetail, T, Word
-from content.placement import LEVELS, Question, build_quiz, score, sentences_below
+from content.placement import LEVELS, Question, build_quiz, score, seed_level, sentences_below
 from content.repository import NewSentence, SentenceRepository, WordRepository
 from content.tokenizer import extract_words
 
@@ -60,7 +60,8 @@ class ContentService:
 
         Adding 3,000 sentences one by one would take thousands of round trips to Azure SQL, so the
         work is done in Python first and then sent in batches: words (ranked ones first, in rank
-        order), sentences (in file order, so id order stays easiest first), then the links.
+        order), sentences (in file order, so id order stays easiest first, each with its level
+        from seed_level), then the links.
         Rows with an empty text or a Spanish text seen before are skipped. The caller commits once.
         """
         created_at = self._now()
@@ -69,12 +70,14 @@ class ContentService:
             spanish, english = spanish.strip(), english.strip()
             if spanish and english and spanish not in sentences:
                 sentences[spanish] = NewSentence(spanish, english, tag_grammar(spanish), attribution, created_at)
+        total = len(sentences)
+        leveled = [new._replace(level=seed_level(position, total)) for position, new in enumerate(sentences.values())]
         words_of = {spanish: extract_words(spanish) for spanish in sentences}
 
         headwords = dict.fromkeys([*word_ranks, *(word for words in words_of.values() for word in words)])
         existing = self._words.ids_by_headword()
         self._words.add_many([(word, word_ranks.get(word)) for word in headwords if word not in existing])
-        self._sentences.add_many(list(sentences.values()))
+        self._sentences.add_many(leveled)
 
         word_ids, sentence_ids = self._words.ids_by_headword(), self._sentences.ids_by_text()
         self._words.link_many([(sentence_ids[spanish], word_ids[word])

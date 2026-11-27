@@ -60,3 +60,7 @@ def test_the_committed_seed_loads_3000_sentences_and_a_quiz(empty_database):
     client = _start(empty_database, BUNDLED_SEED_DIR).test_client()
     assert client.get("/sentences").get_json()["total"] == 3000
     assert len(client.get("/placement/quiz").get_json()["questions"]) == 8
+    # migration 002 ran before the seed, so the import itself stored the levels: 600 per level
+    assert client.get("/sentences/600").get_json()["sentence"]["level"] == 0
+    assert client.get("/sentences/601").get_json()["sentence"]["level"] == 1
+    assert client.get("/sentences/3000").get_json()["sentence"]["level"] == 4
