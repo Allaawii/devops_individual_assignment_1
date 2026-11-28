@@ -1,7 +1,0 @@
-{% macro pager(endpoint, page) %}
-<nav class="pager">
-  {% if page.number > 1 %}<a class="btn btn-ghost btn-sm" href="{{ url_for(endpoint, page=page.number - 1) }}">← Previous</a>{% endif %}
-  <span class="muted small">Page {{ page.number }}</span>
-  {% if page.has_next %}<a class="btn btn-ghost btn-sm" href="{{ url_for(endpoint, page=page.number + 1) }}">Next →</a>{% endif %}
-</nav>
-{% endmacro %}
