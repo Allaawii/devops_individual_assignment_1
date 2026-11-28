@@ -3,6 +3,7 @@
 Skipped when TEST_DATABASE_URL is not set; CI always sets it.
 """
 
+import threading
 from datetime import date, datetime, timedelta
 
 import pymssql
@@ -52,6 +53,39 @@ def test_ensure_cards_creates_each_card_once_in_list_order(conn, cards):
                            (SENTENCE_CARD, 2, None), (WORD_CARD, None, 12)]
     assert cards.get(1).state == CardState()
     cards.ensure_cards([])
+
+
+def test_two_pulls_at_once_create_each_card_once(conn, cards, database_url):
+    """Two requests add the same cards at the same moment, as after a cold start on Azure.
+
+    The first request has inserted its cards but not committed yet. The second request must wait
+    for it (the sp_getapplock in ensure_cards) and then add nothing. Without the lock, the second
+    request reads the cards as missing (CI's test database uses read committed snapshot, as Azure
+    SQL does) and its INSERT fails on the unique index once the first commits.
+    """
+    new = [_sentence(1), _word(10), _word(11)]
+    other = db.connect(database_url)
+    errors: list[Exception] = []
+
+    def second_request() -> None:
+        try:
+            MssqlCardRepository(lambda: other).ensure_cards(new)
+            other.commit()
+        except Exception as error:   # collected, so the assertion below can show it
+            errors.append(error)
+
+    try:
+        cards.ensure_cards(new)                    # first request: inserted, not committed
+        thread = threading.Thread(target=second_request)
+        thread.start()
+        thread.join(timeout=1)
+        assert thread.is_alive()                   # the second request is waiting for the first
+        conn.commit()
+        thread.join(timeout=15)
+    finally:
+        other.close()
+    assert errors == []
+    assert _rows(conn) == [(SENTENCE_CARD, 1, None), (WORD_CARD, None, 10), (WORD_CARD, None, 11)]
 
 
 def test_one_card_per_word_is_enforced_by_the_filtered_index(conn, cards):
