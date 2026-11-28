@@ -11,7 +11,7 @@ from typing import Any, NamedTuple
 from content.db import MssqlRepository
 from content.models import USER_SOURCE, Sentence, Word
 
-SENTENCE_COLUMNS = "s.id, s.spanish_text, s.english_text, s.grammar_note, s.source, s.created_at"
+SENTENCE_COLUMNS = "s.id, s.spanish_text, s.english_text, s.grammar_note, s.source, s.created_at, s.level"
 WORD_COLUMNS = "w.id, w.headword, w.meaning, w.frequency_rank"
 
 
@@ -23,6 +23,7 @@ class NewSentence(NamedTuple):
     grammar_note: str | None
     source: str
     created_at: str
+    level: int | None = None   # the seed's difficulty band, 0-4
 
 
 class SentenceRepository(ABC):
@@ -158,7 +159,7 @@ class MssqlSentenceRepository(MssqlRepository, SentenceRepository):
         return [_to_sentence(row) for row in rows]
 
     def seed(self) -> list[Sentence]:
-        # The seed is imported in difficulty order, so id order is easiest first.
+        # The seed is imported in difficulty order, so id order is easiest first within each level.
         rows = self._fetch_all(f"SELECT {SENTENCE_COLUMNS} FROM sentences s WHERE s.source <> %s ORDER BY s.id",
                                (USER_SOURCE,))
         return [_to_sentence(row) for row in rows]

@@ -227,7 +227,7 @@ components:
 
     Sentence:
       type: object
-      required: [id, spanish_text, english_text, grammar_note, source, created_at]
+      required: [id, spanish_text, english_text, grammar_note, source, created_at, level]
       properties:
         id: { type: integer }
         spanish_text: { type: string }
@@ -235,6 +235,7 @@ components:
         grammar_note: { type: string, nullable: true }
         source: { type: string, description: '"user", or the Tatoeba attribution of a seed sentence.' }
         created_at: { type: string, example: "2026-11-19T10:30:00", description: "ISO-8601 time, without a time zone." }
+        level: { type: integer, minimum: 0, maximum: 4, nullable: true, description: "Difficulty band of a seed sentence (0 = Starter to 4 = Advanced), added by migration 002; null for the learner's own sentences." }
 
     NewSentence:
       type: object

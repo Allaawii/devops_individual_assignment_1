@@ -17,6 +17,7 @@ class Sentence:
     grammar_note: str | None
     source: str
     created_at: str
+    level: int | None = None  # 0-4 for seed sentences (migration 002); None for the learner's own
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ from content.placement import (
     build_quiz,
     level_bands,
     score,
+    seed_level,
     sentences_below,
 )
 
@@ -18,8 +19,9 @@ TESTED_LEVELS = len(LEVELS) - 1  # the hardest band is never asked about
 
 
 def _seed(count: int) -> list[Sentence]:
-    """`count` seed sentences, easiest first, each with its own English text."""
-    return [Sentence(i, f"frase {i}", f"sentence {i}", None, "tatoeba", "2026-10-04") for i in range(1, count + 1)]
+    """`count` seed sentences, easiest first, each with its own English text and its stored level."""
+    return [Sentence(i, f"frase {i}", f"sentence {i}", None, "tatoeba", "2026-10-04", seed_level(i - 1, count))
+            for i in range(1, count + 1)]
 
 
 def _answers(quiz, right_bands: int) -> dict[str, str]:
@@ -29,11 +31,27 @@ def _answers(quiz, right_bands: int) -> dict[str, str]:
 
 # ----- bands -----
 
-def test_seed_is_cut_into_one_equal_band_per_level():
-    bands = level_bands(_seed(52))
+def test_seed_level_gives_equal_bands_like_migration_002():
+    levels = [seed_level(position, 3000) for position in range(3000)]
+    assert [levels.count(level) for level in range(len(LEVELS))] == [600] * 5
+    assert levels[0] == 0 and levels[599] == 0 and levels[600] == 1 and levels[2999] == 4
+
+
+def test_seed_level_spreads_an_uneven_total_by_at_most_one():
+    levels = [seed_level(position, 52) for position in range(52)]
+    assert levels == sorted(levels)
+    assert {levels.count(level) for level in range(len(LEVELS))} == {10, 11}
+
+
+def test_bands_follow_the_stored_level():
+    bands = level_bands(_seed(50))
     assert len(bands) == len(LEVELS)
-    assert all(len(band) == 10 for band in bands)    # 2 leftover sentences are dropped
-    assert bands[0][0].id == 1 and bands[1][0].id == 11
+    assert [[s.id for s in band][:2] for band in bands] == [[1, 2], [11, 12], [21, 22], [31, 32], [41, 42]]
+
+
+def test_sentences_without_a_level_are_in_no_band():
+    seed = _seed(50) + [Sentence(51, "Mía", "Mine", None, "tatoeba", "2026-10-04", None)]
+    assert sum(len(band) for band in level_bands(seed)) == 50
 
 
 def test_sentences_below_a_level_are_the_easiest_bands():
@@ -70,7 +88,7 @@ def _two_pattern_seed(count: int) -> list[Sentence]:
         word = _letters(i)
         spanish, english = (f"Veo {word} hoy.", f"I see {word} today.") if i % 2 else \
                            (f"Como {word} ahora.", f"I eat {word} now.")
-        seed.append(Sentence(i, spanish, english, None, "tatoeba", "2026-10-04"))
+        seed.append(Sentence(i, spanish, english, None, "tatoeba", "2026-10-04", seed_level(i - 1, count)))
     return seed
 
 
@@ -84,7 +102,7 @@ def test_a_sentence_that_might_mean_the_same_is_not_used_as_a_wrong_option():
     seed = _two_pattern_seed(50)
     question = build_quiz(seed)[0]                           # about sentence 4: "Como ae ahora."
     # Same content words and almost the same English: it would rank first without the subset rule.
-    paraphrase = Sentence(50, f"Ahora como {_letters(4)}.", f"Now I eat {_letters(4)}.", None, "tatoeba", "x")
+    paraphrase = Sentence(50, f"Ahora como {_letters(4)}.", f"Now I eat {_letters(4)}.", None, "tatoeba", "x", 4)
     quiz = build_quiz(seed[:-1] + [paraphrase])
     assert quiz[0].sentence_id == question.sentence_id
     assert paraphrase.english_text not in quiz[0].options
@@ -104,13 +122,13 @@ def test_a_much_longer_sentence_is_not_used_as_a_wrong_option():
     # Question 2 is "Veo ah hoy." / "I see ah today." This one shares as many Spanish words as the
     # other "Veo X hoy." sentences and more English words, so only its length should rule it out.
     long_one = Sentence(50, "Veo ah mañana.", "I see ah and many other things in a very long sentence today.",
-                        None, "tatoeba", "x")
+                        None, "tatoeba", "x", 4)
     quiz = build_quiz(seed[:-1] + [long_one])
     assert quiz[1].spanish == "Veo ah hoy."
     assert long_one.english_text not in quiz[1].options
 
 
-@pytest.mark.parametrize("count", [0, 5, 29])
+@pytest.mark.parametrize("count", [0, 5, 29])     # 29: the smallest band has 5 sentences, one too few
 def test_too_small_a_seed_gives_no_quiz(count):
     assert build_quiz(_seed(count)) == []
 

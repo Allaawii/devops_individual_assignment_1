@@ -18,7 +18,10 @@ class FakeSentenceRepository(SentenceRepository):
 
     def add_many(self, sentences: list[NewSentence]) -> None:
         for new in sentences:
-            self.add(**new._asdict())
+            fields = new._asdict()
+            level = fields.pop("level")
+            added = self.add(**fields)
+            self.rows[added.id] = replace(added, level=level)
 
     def exists(self, spanish_text: str) -> bool:
         return any(s.spanish_text == spanish_text for s in self.rows.values())

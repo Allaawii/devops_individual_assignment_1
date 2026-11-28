@@ -3,6 +3,8 @@ import { content } from "./api.js";
 import { el, errorBox, pageNumber, pager, show } from "./dom.js";
 
 const page = document.getElementById("page");
+// The level a seed sentence stores (migration 002); the learner's own sentences have none.
+const LEVEL_NAMES = ["Starter", "Beginner", "Elementary", "Intermediate", "Advanced"];
 
 async function load() {
   try {
@@ -15,10 +17,12 @@ async function load() {
         ? el("div", { class: "panel center" }, el("p", { class: "muted" }, "Start your collection."),
             el("a", { class: "btn", href: "add.html" }, "Add a sentence"))
         : [el("div", { class: "table-wrap" }, el("table", {},
-            el("thead", {}, el("tr", {}, el("th", {}, "Spanish"), el("th", { class: "hide-small" }, "English"))),
+            el("thead", {}, el("tr", {}, el("th", {}, "Spanish"), el("th", { class: "hide-small" }, "English"),
+              el("th", {}, "Level"))),
             el("tbody", {}, list.items.map((sentence) => el("tr", {},
               el("td", { lang: "es" }, el("a", { href: `sentence.html?id=${sentence.id}` }, sentence.spanish_text)),
-              el("td", { class: "hide-small muted" }, sentence.english_text)))))),
+              el("td", { class: "hide-small muted" }, sentence.english_text),
+              el("td", { class: "muted" }, sentence.level === null ? "Your own" : LEVEL_NAMES[sentence.level])))))),
           pager("sentences.html", list.page, list.has_next)]);
   } catch (error) {
     show(page, errorBox(error, load));

@@ -23,7 +23,8 @@ def test_post_sentence_returns_201_and_the_sentence(client):
     response = _post_sentence(client, grammar_note="My note")
     assert response.status_code == 201
     assert response.get_json() == {"id": 1, "spanish_text": "El gato come.", "english_text": "The cat eats.",
-                                   "grammar_note": "My note", "source": "user", "created_at": "2026-11-16T10:30:00"}
+                                   "grammar_note": "My note", "source": "user", "created_at": "2026-11-16T10:30:00",
+                                   "level": None}
 
 
 def test_post_duplicate_sentence_is_a_400_with_the_reason(client):

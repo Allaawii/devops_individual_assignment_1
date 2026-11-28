@@ -156,6 +156,7 @@ jobs:
       - name: Migrations ran once, and a restart applies nothing
         run: |
           docker compose logs content | grep "migration applied: 001_init"
+          docker compose logs content | grep "migration applied: 002_add_sentence_level"
           docker compose logs scheduler | grep "migration applied: 001_init"
           docker compose restart content
           for attempt in $(seq 1 30); do

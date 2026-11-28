@@ -99,6 +99,12 @@ def test_import_seed_skips_empty_and_repeated_rows(service):
     assert [s.spanish_text for s in service.list_sentences(1).items] == ["Hola", "Adiós"]
 
 
+def test_import_seed_stores_each_sentence_level_in_file_order(service):
+    _import_seed(service, 10)
+    service.add_sentence("Mi propia frase.", "My own sentence.")
+    assert [s.level for s in service.list_sentences(1).items] == [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, None]
+
+
 def test_import_seed_reuses_words_that_already_exist(service, word_repo):
     gato = word_repo.get_or_create("gato")
     service.import_seed([("El gato come.", "The cat eats.", "t")], {"gato": 1})
