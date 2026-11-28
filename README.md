@@ -6,7 +6,7 @@ IE University · SDD/DevOps. Assignment 1 built it as one Flask process with SQL
 
 **Live:** https://aalsamaraieu2024ui.z28.web.core.windows.net
 
-The services scale to zero and the databases pause after an hour without use. The first request after a quiet period can take up to about a minute while both wake up; the UI says "The service is starting up" until then.
+The services scale to zero and the databases pause after an hour without use. The first request after a quiet period can take up to about a minute while both wake up; the UI waits up to 75 s per call and, after 4 s, says the app is waking up.
 
 ## Features
 
@@ -94,7 +94,7 @@ ruff check .
 pytest --cov
 ```
 
-The tests that need SQL Server (repositories, migrations, startup) skip unless `TEST_DATABASE_URL` points at one, for example `mssql://sa:<password>@localhost:1433/master` with a local SQL Server container. CI always runs them against a real SQL Server and fails if any is skipped (`REQUIRE_SQL_TESTS`). In CI: **content 209 tests, scheduler 155 tests, both 99% coverage** (the pipeline fails below 70%).
+The tests that need SQL Server (repositories, migrations, startup) skip unless `TEST_DATABASE_URL` points at one, for example `mssql://sa:<password>@localhost:1433/master` with a local SQL Server container. CI always runs them against a real SQL Server and fails if any is skipped (`REQUIRE_SQL_TESTS`). In CI: **content 209 tests, scheduler 156 tests, both 99% coverage** (the pipeline fails below 70%).
 
 - **Pure logic** (scheduling algorithms, tokenizer, grammar rules, placement quiz, seed builder) is tested directly; the algorithms take `today` as a parameter.
 - **Services and routes** use in-memory fake repositories, and the scheduler uses a fake content client, so these tests need no database or network.
@@ -182,7 +182,7 @@ The builder keeps sentences of 3-12 words without digits, ranks every word by ho
 
 ## Scope and known limitations
 
-- Spanish only, with English as the base language. One learner, no login: anyone with the URL uses the same cards.
+- Spanish only, with English as the base language. One learner, no login: anyone with the URL uses the same cards. Accounts would need sign-in in one place (a gateway or an auth service, ADR-10) and a migration that adds a `learner_id` to `cards`, `reviews` and `settings`, with existing rows given to a default learner; content stays shared.
 - Words are not lemmatized, so *hablo* and *hablas* are separate words.
 - No "delete sentence", because cards in the other database refer to sentences by ID (ADR-3).
 - Resetting one database without the other breaks the card-to-sentence mapping; reset both together.

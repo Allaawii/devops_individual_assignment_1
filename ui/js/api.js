@@ -1,7 +1,11 @@
 // Calls to the two services. The base URLs come from config.js (window.FRASE_CONFIG).
 // Every call has a timeout, and every failure becomes an ApiError with a message a person can read.
 
-const TIMEOUT_MS = 10000; // generous: a service that scaled to zero on Azure needs a few seconds to wake up
+// Long enough for a cold start: on Azure a service that scaled to zero, and its paused database,
+// take about a minute to wake up, and the first request waits for that instead of failing.
+const TIMEOUT_MS = 75000;
+const SLOW_MS = 4000; // after this, a "Loading..." text explains why the page is waiting
+const SLOW_TEXT = "Loading... The app was idle and is waking up, which takes about a minute.";
 
 export class ApiError extends Error {
   constructor(status, code, message) {
@@ -14,6 +18,9 @@ export class ApiError extends Error {
 async function call(baseUrl, path, { method = "GET", body } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const slowTimer = setTimeout(() => {
+    document.querySelectorAll(".loading").forEach((node) => { node.textContent = SLOW_TEXT; });
+  }, SLOW_MS);
   let response;
   try {
     response = await fetch(baseUrl + path, {
@@ -24,9 +31,10 @@ async function call(baseUrl, path, { method = "GET", body } = {}) {
     });
   } catch (error) {
     const reason = error.name === "AbortError" ? "is taking too long to answer" : "could not be reached";
-    throw new ApiError(0, "unreachable", `The service ${reason}. It may be waking up; try again in a few seconds.`);
+    throw new ApiError(0, "unreachable", `The service ${reason}. If nobody used it for an hour it may still be waking up, which takes about a minute; try again then.`);
   } finally {
     clearTimeout(timer);
+    clearTimeout(slowTimer);
   }
   const data = await response.json().catch(() => null); // an error page that is not JSON gives null
   if (!response.ok && data?.error) {
@@ -36,7 +44,7 @@ async function call(baseUrl, path, { method = "GET", body } = {}) {
     // Azure itself answers 503 "App port is not ready" while a container that scaled to zero
     // starts and its database resumes (up to about a minute).
     throw new ApiError(response.status, "starting_up",
-                       "The service is starting up after being idle. Try again in a few seconds.");
+                       "The service is waking up after being idle, which takes about a minute. Try again then.");
   }
   if (!response.ok) {
     throw new ApiError(response.status, "http_error", `The service answered with status ${response.status}.`);

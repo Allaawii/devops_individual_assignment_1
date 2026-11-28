@@ -89,6 +89,19 @@ class SettingsStore(ABC):
 
 class MssqlCardRepository(MssqlRepository, CardRepository):
     def ensure_cards(self, cards: list[NewCard]) -> None:
+        """Insert the cards that do not exist yet, one request at a time.
+
+        Two requests can pull the same sentences at once (after a cold start the UI's first calls
+        all arrive together). Without the lock both would see the cards as missing and the second
+        INSERT would hit the unique index. sp_getapplock takes a named lock that is held until this
+        request's transaction ends, so the second request waits, then sees the cards and adds none.
+        """
+        lock = self._scalar("DECLARE @result int; "
+                            "EXEC @result = sp_getapplock @Resource = N'ensure_cards', @LockMode = N'Exclusive', "
+                            "@LockOwner = N'Transaction', @LockTimeout = 10000; "
+                            "SELECT @result AS result")
+        if lock < 0:
+            raise RuntimeError(f"could not take the ensure_cards lock (sp_getapplock returned {lock})")
         sentence_ids = [card.sentence_id for card in cards if card.sentence_id is not None]
         word_ids = [card.word_id for card in cards if card.word_id is not None]
         have_sentences = {row["sentence_id"] for row in self._fetch_all_in(
